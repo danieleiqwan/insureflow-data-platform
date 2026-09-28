@@ -9,10 +9,16 @@ specifications:
 - Deterministic timestamps derived from a fixed reference date
 """
 
+import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import random
 from typing import List, Tuple
+
+# Ensure repository root is on sys.path when invoked directly as a script
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from faker import Faker
 import pandas as pd

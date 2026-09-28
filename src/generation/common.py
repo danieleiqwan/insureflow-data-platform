@@ -13,16 +13,16 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
-# ─── Seeds ────────────────────────────────────────────────────────────────────
+# --- Seeds --------------------------------------------------------------------
 BASE_SEED = 42
 POLICY_SEED_OFFSET = 1000
 CLAIM_SEED_OFFSET = 2000
 PAYMENT_SEED_OFFSET = 3000
 
-# ─── Reference date (must match generate_customers.py) ────────────────────────
+# --- Reference date (must match generate_customers.py) ------------------------
 REFERENCE_DATE = date(2026, 1, 1)
 
-# ─── Eligible KATEGORI_FASILITI by claim_type ─────────────────────────────────
+# --- Eligible KATEGORI_FASILITI by claim_type ---------------------------------
 CLAIM_TYPE_CATEGORIES: dict[str, frozenset[str]] = {
     "INPATIENT":  frozenset({"HOSPITAL"}),
     "EMERGENCY":  frozenset({"HOSPITAL"}),
@@ -30,7 +30,7 @@ CLAIM_TYPE_CATEGORIES: dict[str, frozenset[str]] = {
     "DENTAL":     frozenset({"KLINIK PERGIGIAN"}),
 }
 
-# ─── Customer state → NEGERI values in facilities_master.csv ─────────────────
+# --- Customer state -> NEGERI values in facilities_master.csv -----------------
 # Handles both simple NEGERI codes and the compound WILAYAH prefix variants.
 CUSTOMER_STATE_TO_NEGERI: dict[str, list[str]] = {
     "Johor":           ["JOHOR"],
@@ -58,7 +58,7 @@ CUSTOMER_STATE_TO_NEGERI: dict[str, list[str]] = {
 }
 
 
-# ─── Money helpers ────────────────────────────────────────────────────────────
+# --- Money helpers ------------------------------------------------------------
 
 def money(amount: Any) -> Decimal:
     """Convert to Decimal and quantize to 2 decimal places (ROUND_HALF_UP)."""
@@ -69,13 +69,13 @@ def lognormal(median: float, sigma: float, lo: float, hi: float,
               rng) -> Decimal:
     """Return a lognormally-distributed Decimal amount clamped to [lo, hi].
 
-    Uses stdlib random.gauss — no numpy required.
+    Uses stdlib random.gauss -- no numpy required.
     """
     raw = math.exp(rng.gauss(math.log(median), sigma))
     return money(max(lo, min(hi, raw)))
 
 
-# ─── ID formatters ────────────────────────────────────────────────────────────
+# --- ID formatters ------------------------------------------------------------
 
 def fmt_policy_id(n: int) -> str:
     return f"P{n:07d}"
@@ -89,12 +89,12 @@ def fmt_payment_id(n: int) -> str:
     return f"PM{n:07d}"
 
 
-# ─── Deterministic timestamp ──────────────────────────────────────────────────
+# --- Deterministic timestamp --------------------------------------------------
 
 def seeded_timestamp(event_date: date, rng) -> str:
     """Derive a deterministic TIMESTAMPTZ string from an event date.
 
-    Adds a seeded second offset (0–86399) to midnight UTC on event_date.
+    Adds a seeded second offset (0-86399) to midnight UTC on event_date.
     Format: YYYY-MM-DD HH:MM:SS+00:00
     """
     offset_s = rng.randint(0, 86399)
@@ -106,7 +106,7 @@ def seeded_timestamp(event_date: date, rng) -> str:
     return ts
 
 
-# ─── CSV writer ───────────────────────────────────────────────────────────────
+# --- CSV writer ---------------------------------------------------------------
 
 def write_csv(rows: list[dict[str, Any]], columns: list[str],
               output_path: Path) -> None:
@@ -126,12 +126,12 @@ def write_csv(rows: list[dict[str, Any]], columns: list[str],
         writer.writerows(rows)
 
 
-# ─── Facilities loader ────────────────────────────────────────────────────────
+# --- Facilities loader --------------------------------------------------------
 
 def load_facilities(raw_dir: Path) -> list[dict[str, str]]:
     """Load facilities_master.csv and return as list of dicts.
 
-    Raises FileNotFoundError if the file is absent — callers should surface this
+    Raises FileNotFoundError if the file is absent -- callers should surface this
     with a clear message so users know to run download_sources.py first.
     """
     path = raw_dir / "facilities_master.csv"

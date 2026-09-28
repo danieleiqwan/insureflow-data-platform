@@ -6,9 +6,9 @@ Seeded independently (BASE_SEED + PAYMENT_SEED_OFFSET).
 Payment rules:
 - Only for APPROVED and PARTIALLY_APPROVED claims.
 - Normally 1 COMPLETED payment per claim; ~15% have a FAILED attempt first.
-- payment_date = claim_date + 3–30 days; if > REFERENCE_DATE → PENDING.
-- For FAILED+retry: retry_date = payment_date + 1–10 days.
-  If retry_date > REFERENCE_DATE → main payment is PENDING (no failed entry added).
+- payment_date = claim_date + 3-30 days; if > REFERENCE_DATE -> PENDING.
+- For FAILED+retry: retry_date = payment_date + 1-10 days.
+  If retry_date > REFERENCE_DATE -> main payment is PENDING (no failed entry added).
 - Sum of COMPLETED payments per claim = approved_amount.
 - FAILED payments use the same amount and do not count toward the sum.
 - payment_method weights: BANK_TRANSFER 60%, E_WALLET 15%, CARD 15%, CHEQUE 10%.
@@ -18,9 +18,15 @@ Payment rules:
 from __future__ import annotations
 
 import random
+import sys
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
+
+# Ensure repository root is on sys.path when invoked directly as a script
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import pandas as pd
 
@@ -34,20 +40,20 @@ from src.generation.common import (
     write_csv,
 )
 
-# ─── Schema ───────────────────────────────────────────────────────────────────
+# --- Schema -------------------------------------------------------------------
 COLUMNS = [
     "payment_id", "claim_id", "payment_date",
     "amount", "payment_method", "status", "created_at",
 ]
 
-# ─── Enums ────────────────────────────────────────────────────────────────────
+# --- Enums --------------------------------------------------------------------
 VALID_METHODS  = {"BANK_TRANSFER", "CHEQUE", "CARD", "E_WALLET"}
 VALID_STATUSES = {"PENDING", "COMPLETED", "FAILED"}
 
 _METHODS  = ["BANK_TRANSFER", "E_WALLET", "CARD", "CHEQUE"]
 _WEIGHTS  = [0.60, 0.15, 0.15, 0.10]
 
-# ─── Builder ──────────────────────────────────────────────────────────────────
+# --- Builder ------------------------------------------------------------------
 
 def build_payments(
     claims_df: pd.DataFrame,
@@ -71,7 +77,7 @@ def build_payments(
         approved_amount = money(claim["approved_amount"])
         claim_date = date.fromisoformat(claim["claim_date"])
 
-        # Base payment date: claim_date + 3–30 days
+        # Base payment date: claim_date + 3-30 days
         base_days = rng.randint(3, 30)
         payment_date = claim_date + timedelta(days=base_days)
 
@@ -80,7 +86,7 @@ def build_payments(
 
         if has_failed:
             # Only add the FAILED entry if the retry will actually complete
-            # (otherwise the complexity adds no value — single PENDING is cleaner)
+            # (otherwise the complexity adds no value -- single PENDING is cleaner)
             retry_date = payment_date + timedelta(days=rng.randint(1, 10))
             if retry_date <= REFERENCE_DATE:
                 # FAILED attempt on original payment_date
@@ -99,7 +105,7 @@ def build_payments(
                 payment_date = retry_date
                 method = rng.choices(_METHODS, weights=_WEIGHTS, k=1)[0]
             else:
-                # Retry is in the future — consume the RNG calls to stay aligned
+                # Retry is in the future -- consume the RNG calls to stay aligned
                 # but just emit a single PENDING payment on the base date
                 rng.choices(_METHODS, weights=_WEIGHTS, k=1)  # consume retry method
 
@@ -124,7 +130,7 @@ def build_payments(
     return records
 
 
-# ─── Validation ───────────────────────────────────────────────────────────────
+# --- Validation ---------------------------------------------------------------
 
 def validate_payments(
     records: list[dict],
@@ -136,7 +142,7 @@ def validate_payments(
     - ID format and uniqueness.
     - FK: claim_id exists in claims.
     - Enum: payment_method and status.
-    - payment_date ≥ claim_date.
+    - payment_date >= claim_date.
     - Sum of COMPLETED payments per claim = approved_amount.
     - PENDING/FAILED payments only for valid claims.
 
@@ -145,7 +151,7 @@ def validate_payments(
     """
     seen: set[str] = set()
 
-    # Build claim lookup: claim_id → {claim_date, approved_amount, status}
+    # Build claim lookup: claim_id -> {claim_date, approved_amount, status}
     claim_info: dict[str, dict] = {}
     for _, row in claims_df.iterrows():
         claim_info[row["claim_id"]] = {
@@ -184,7 +190,7 @@ def validate_payments(
         if amount < 0:
             raise ValueError(f"Negative amount in payment {pid}")
 
-        # payment_date ≥ claim_date
+        # payment_date >= claim_date
         pay_date   = date.fromisoformat(r["payment_date"])
         claim_date = claim_info[r["claim_id"]]["claim_date"]
         if pay_date < claim_date:
@@ -216,7 +222,7 @@ def validate_payments(
             )
 
 
-# ─── Entry point ──────────────────────────────────────────────────────────────
+# --- Entry point --------------------------------------------------------------
 
 def main() -> None:
     """Generate and save synthetic payments."""

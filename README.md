@@ -66,12 +66,14 @@ flowchart LR
 
 ## Current Datasets (Phase 1 & Phase 2B)
 
+> **Dataset Reference (As-Of) Date:** `2026-01-01`. All temporal fields (customer ages at reference, policy terms, claim dates, and payment settlement windows) are anchored deterministically to this fixed date to ensure 100% reproducible data generation without wall-clock drift.
+
 | Entity / File | Source | Records | Size | Description |
 |---|---|---:|---:|---|
 | `data/raw/customers.csv` | Synthetic (P1) | 1,000 | ~89 KB | Base customers across 16 states/territories, aged 18–65 |
-| `data/raw/policies.csv` | Synthetic (P2B) | 1,379 | ~128 KB | 1-year policies (MEDICAL, HOSPITALIZATION, CRITICAL_ILLNESS, PA) |
-| `data/raw/claims.csv` | Synthetic (P2B) | 1,059 | ~109 KB | Claims linked to policies and MOH treatment facilities |
-| `data/raw/payments.csv` | Synthetic (P2B) | 814 | ~69 KB | Payouts for APPROVED/PARTIALLY_APPROVED claims |
+| `data/raw/policies.csv` | Synthetic (P2B) | 1,379 | ~135 KB | 1-year policies (MEDICAL, HOSPITALIZATION, CRITICAL_ILLNESS, PA) |
+| `data/raw/claims.csv` | Synthetic (P2B) | 423 | ~45 KB | Claims linked to policies and MOH treatment facilities |
+| `data/raw/payments.csv` | Synthetic (P2B) | 364 | ~32 KB | Payouts for APPROVED/PARTIALLY_APPROVED claims |
 | `data/raw/facilities_master.csv` | MOH Malaysia (P2A) | 5,160 | ~956 KB | Public healthcare facilities registry (`KOD_FASILITI` PK) |
 
 ### Attribution & Data Source Notice

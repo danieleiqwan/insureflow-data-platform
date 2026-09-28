@@ -453,3 +453,49 @@ def test_payments_determinism(claims_df: pd.DataFrame) -> None:
         write_csv(run2, PAYMENT_COLUMNS, p2)
         assert p1.read_bytes() == p2.read_bytes(), \
             "payments.csv output is not byte-identical across runs"
+
+
+# ─── Invocation Mode Subprocess Tests ──────────────────────────────────────────
+
+GENERATOR_SCRIPTS = [
+    "generate_customers",
+    "generate_policies",
+    "generate_claims",
+    "generate_payments",
+    "generate_all",
+]
+
+
+@pytest.mark.parametrize("script_name", GENERATOR_SCRIPTS)
+def test_generator_direct_script_invocation(script_name: str) -> None:
+    """Each generator must run cleanly via `python src/generation/<name>.py`."""
+    import subprocess
+    import sys
+    script_path = Path("src") / "generation" / f"{script_name}.py"
+    res = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, (
+        f"Direct script execution failed for {script_path}:\n"
+        f"stdout: {res.stdout}\nstderr: {res.stderr}"
+    )
+
+
+@pytest.mark.parametrize("script_name", GENERATOR_SCRIPTS)
+def test_generator_module_invocation(script_name: str) -> None:
+    """Each generator must run cleanly via `python -m src.generation.<name>`."""
+    import subprocess
+    import sys
+    module_path = f"src.generation.{script_name}"
+    res = subprocess.run(
+        [sys.executable, "-m", module_path],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, (
+        f"Module execution failed for {module_path}:\n"
+        f"stdout: {res.stdout}\nstderr: {res.stderr}"
+    )
+

@@ -179,13 +179,31 @@ Only the customer format is implemented in Phase 1; the others are the conventio
 
 ## 7. Synthetic Data Design
 
-- **Determinism:** a single fixed seed feeds both `random` and Faker. No field uses wall-clock time. Same seed → byte-identical CSV.
+- **Reference Date:** Fixed reference (as-of) date is `2026-01-01` across all generators and temporal rules. Customer ages, policy terms, claim dates, and payment settlement statuses are derived relative to this fixed date (no wall-clock time).
+- **Determinism:** a single fixed seed feeds both `random` and Faker. No field uses wall-clock time. Same seed -> byte-identical CSV.
 - **Names:** curated first/last-name lists for Malay, Chinese, and Indian communities, sampled with approximate population weights.
 - **Occupations:** curated list of ~30 realistic Malaysian occupations.
 - **States:** 13 states + 3 Federal Territories (Kuala Lumpur, Putrajaya, Labuan).
-- **Age:** 18–65 relative to a fixed reference date (not today's date).
+- **Age:** 18–65 relative to the fixed reference date `2026-01-01` (not today's date).
 - **Clearly synthetic:** no real individuals; no realistic national ID numbers, phone numbers, or emails in Phase 1.
 - **Realism upgrades for later phases:** claim amounts correlated with claim type, seasonality, occasional deliberate defects (nulls, duplicates, out-of-range values) to give the Data Quality phase real work.
+
+### 7.1 Actuarial Calibration Assumptions (Phase 2B)
+
+The Phase 2B generators simulate an authentic Malaysian retail health insurance portfolio:
+- **Annual Premiums (MYR):** Calibrated to prevailing Malaysian private insurance rates using base rates, quadratic age loadings ($18 \le \text{age} \le 65$), and seeded variation ($\pm 8\%$):
+  - `PERSONAL_ACCIDENT`: ~RM 200–RM 340/yr (modest age gradient, primarily accident protection).
+  - `HOSPITALIZATION`: ~RM 530–RM 2,800/yr (daily hospital income and surgical allowances).
+  - `MEDICAL`: ~RM 895–RM 4,850/yr (comprehensive medical card with progressive age brackets).
+  - `CRITICAL_ILLNESS`: ~RM 690–RM 4,970/yr (lump-sum benefit with steep age curve).
+- **Claim Frequency:** Annual claim incidence is calibrated to ~0.31 claims per policy-year, with the vast majority (~76%) of policyholders having zero claims, ~18% having 1 claim, and ~5% having 2 claims.
+- **Loss Ratio & Payout Targets:**
+  - Overall `approved_amount / premium`: ~74% (target range: 60%–90%).
+  - Overall `paid_amount / premium`: ~60%.
+  - Product-level loss ratios: `PERSONAL_ACCIDENT` low (~49%), `CRITICAL_ILLNESS` (~46%), `HOSPITALIZATION` (~66%), and `MEDICAL` (~88%).
+- **Claim Status Lifecycle & Settlement:**
+  - Historical claims ($>30$ days prior to reference date) are 100% resolved (`APPROVED`, `PARTIALLY_APPROVED`, `REJECTED`).
+  - `SUBMITTED` status represents active adjudication and is confined to recent claims ($\le 30$ days before `2026-01-01`), achieving a portfolio-wide distribution of ~62% `APPROVED`, ~15% `PARTIALLY_APPROVED`, ~13% `REJECTED`, and ~9% `SUBMITTED`.
 
 ## 8. Repository Layout
 
@@ -305,6 +323,7 @@ Introduced with Silver. Principles decided now so later work stays consistent:
 | ADR-008 | Curated name/occupation lists instead of Faker defaults | Faker defaults are not realistically Malaysian | Accepted |
 | ADR-009 | `ON DELETE RESTRICT` on all foreign key constraints | In insurance/financial systems, accidental cascading deletes of parent entities (customers, policies, claims) silently wipe audit trails and violate regulatory/data integrity requirements. Parent records must not be deleted while active child references exist. | Accepted |
 | ADR-010 | Real facility IDs from MOH master as PK and claims FK | Sourced from Ministry of Health Malaysia (`KOD_FASILITI`). Establishes referential integrity on `claims.facility_id` with `ON DELETE RESTRICT`, `NOT NULL`, and indexing. Supersedes ADR-007. | Accepted |
+| ADR-011 | Omit CHECK constraints on externally sourced facility category/subsector | External government registries (MOH) can introduce new categories or subsectors over time. Hardcoded CHECK constraints at the database ingestion boundary would fail upstream loads. Validation and conformance belong to the Data Quality phase (Silver layer) rather than raw DDL. Columns remain `NOT NULL`. | Accepted |
 
 ## 16. Conventions
 

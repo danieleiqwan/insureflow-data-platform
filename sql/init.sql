@@ -24,16 +24,7 @@ CREATE TABLE facilities (
     postcode            VARCHAR(10),
     latitude            NUMERIC(9,6)    NOT NULL,
     longitude           NUMERIC(9,6)    NOT NULL,
-    created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
-    CONSTRAINT chk_facilities_category CHECK (
-        facility_category IN (
-            'HOSPITAL', 'KLINIK', 'KLINIK PERGIGIAN',
-            'PEJABAT KESIHATAN', 'PEJABAT KESIHATAN PERGIGIAN',
-            'LAIN-LAIN', 'PUSAT PROMOSI KESIHATAN',
-            'INSTITUSI', 'JABATAN KESIHATAN NEGERI', 'MAKMAL', 'PEJABAT FARMASI'
-        )
-    ),
-    CONSTRAINT chk_facilities_subsector CHECK (subsector IN ('KKM', 'KPT', 'ATM'))
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
 -- 1. Customers Table

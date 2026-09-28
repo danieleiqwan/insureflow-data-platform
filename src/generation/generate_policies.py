@@ -4,23 +4,29 @@ Reads customers.csv and generates policies.csv with deterministic output.
 Seeded independently of the customer generator (BASE_SEED + POLICY_SEED_OFFSET).
 
 Policy rules:
-- ~10% of customers have no policy; others have 1–3.
+- ~10% of customers have no policy; others have 1-3.
 - policy_type weights: MEDICAL 40%, HOSPITALIZATION 30%,
   CRITICAL_ILLNESS 15%, PERSONAL_ACCIDENT 15%.
-- start_date on/after customer's created_at and customer ≥18 at start_date.
+- start_date on/after customer's created_at and customer >=18 at start_date.
 - Term: 1 year (end_date = start_date + 1 year − 1 day).
 - Status: EXPIRED if end_date < REFERENCE_DATE; otherwise ACTIVE.
   About 5% are CANCELLED and 3% LAPSED (sampled before date check).
-- Premium: base rate by type, age-loaded, ±10% noise. MYR, NUMERIC(12,2).
+- Premium: base rate by type, age-loaded, +/-10% noise. MYR, NUMERIC(12,2).
 - created_at: seeded seconds after midnight UTC on start_date.
 """
 
 from __future__ import annotations
 
 import random
+import sys
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+
+# Ensure repository root is on sys.path when invoked directly as a script
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import pandas as pd
 
@@ -35,29 +41,19 @@ from src.generation.common import (
     write_csv,
 )
 
-# ─── Schema ───────────────────────────────────────────────────────────────────
+# --- Schema -------------------------------------------------------------------
 COLUMNS = [
     "policy_id", "customer_id", "policy_type",
     "start_date", "end_date", "premium", "status", "created_at",
 ]
 
-# ─── Enums ────────────────────────────────────────────────────────────────────
+# --- Enums --------------------------------------------------------------------
 POLICY_TYPES = [
     "MEDICAL", "HOSPITALIZATION", "CRITICAL_ILLNESS", "PERSONAL_ACCIDENT"
 ]
 POLICY_TYPE_WEIGHTS = [0.40, 0.30, 0.15, 0.15]
 
 VALID_STATUSES = {"ACTIVE", "EXPIRED", "CANCELLED", "LAPSED"}
-
-# ─── Premium parameters ───────────────────────────────────────────────────────
-# Base annual premium (MYR) — chosen to produce plausible Malaysian values.
-# Age loading adds 0.5% per year above 30.
-_PREMIUM_BASE: dict[str, Decimal] = {
-    "MEDICAL":            Decimal("180.00"),
-    "HOSPITALIZATION":    Decimal("240.00"),
-    "CRITICAL_ILLNESS":   Decimal("320.00"),
-    "PERSONAL_ACCIDENT":  Decimal("120.00"),
-}
 
 
 def _calculate_age(dob: date, ref: date) -> int:
@@ -67,19 +63,37 @@ def _calculate_age(dob: date, ref: date) -> int:
 
 def _compute_premium(policy_type: str, age_at_start: int,
                      rng: random.Random) -> Decimal:
-    """Return a plausible annual premium (Decimal, 2 dp).
+    """Return an actuarially plausible Malaysian annual premium (Decimal, 2 dp).
 
-    Formula: base × age_loading × noise
-    - age_loading: +0.5% per year above 30 (additive, clamped at 35% max load)
-    - noise: uniform ±10%
-    Final value is rounded to nearest MYR 0.10 for realism.
+    Calibrated to realistic Malaysian market rates:
+    - PERSONAL_ACCIDENT: RM 200 - RM 400/yr (mostly flat, modest age loading).
+    - MEDICAL: RM 900 - RM 5,500/yr (comprehensive medical card with progressive age bands).
+    - HOSPITALIZATION: RM 550 - RM 3,200/yr (daily hospital income & surgical cover).
+    - CRITICAL_ILLNESS: RM 700 - RM 6,500/yr (lump-sum benefit with steep age curve).
+
+    Formula combines base rate, quadratic age loading, and seeded noise (+/-8%).
+    Rounded to nearest MYR 0.10.
     """
-    base = _PREMIUM_BASE[policy_type]
-    age_load = Decimal("1.0") + Decimal("0.005") * max(0, age_at_start - 30)
-    noise = Decimal(str(1.0 + (rng.random() - 0.5) * 0.20))
-    raw = base * age_load * noise
-    # Round to nearest MYR 0.10
-    rounded = (raw / Decimal("0.10")).to_integral_value() * Decimal("0.10")
+    age = max(18, age_at_start)
+    age_delta = age - 18
+    noise = 1.0 + (rng.random() - 0.5) * 0.16  # uniform +/-8% seeded variation
+
+    if policy_type == "PERSONAL_ACCIDENT":
+        base = 220.0 + 2.2 * age_delta
+        raw = base * noise
+    elif policy_type == "MEDICAL":
+        base = 920.0 * (1.0 + 0.033 * age_delta + 0.0012 * (age_delta ** 2))
+        raw = base * noise
+    elif policy_type == "HOSPITALIZATION":
+        base = 560.0 * (1.0 + 0.029 * age_delta + 0.0011 * (age_delta ** 2))
+        raw = base * noise
+    elif policy_type == "CRITICAL_ILLNESS":
+        base = 720.0 * (1.0 + 0.027 * age_delta + 0.0020 * (age_delta ** 2))
+        raw = base * noise
+    else:
+        raise ValueError(f"Unknown policy type: {policy_type}")
+
+    rounded = (Decimal(str(raw)) / Decimal("0.10")).to_integral_value() * Decimal("0.10")
     return money(rounded)
 
 
@@ -102,7 +116,7 @@ def _policy_dates(
     try:
         end = start.replace(year=start.year + 1) - timedelta(days=1)
     except ValueError:
-        # Leap-day edge (29 Feb → 28 Feb next year)
+        # Leap-day edge (29 Feb -> 28 Feb next year)
         end = date(start.year + 1, 3, 1) - timedelta(days=1)
     return start, end
 
@@ -121,7 +135,7 @@ def _derive_status(end_date: date, rng: random.Random) -> str:
     return "EXPIRED" if end_date < REFERENCE_DATE else "ACTIVE"
 
 
-# ─── Builder ──────────────────────────────────────────────────────────────────
+# --- Builder ------------------------------------------------------------------
 
 def build_policies(
     customers_df: pd.DataFrame,
@@ -166,7 +180,7 @@ def build_policies(
                 try:
                     start = date(dob.year + 18, dob.month, dob.day)
                 except ValueError:
-                    start = date(dob.year + 18, 3, 1)  # Feb 29 → Mar 1
+                    start = date(dob.year + 18, 3, 1)  # Feb 29 -> Mar 1
                 if start > REFERENCE_DATE - timedelta(days=1):
                     rng.random()
                     rng.random()
@@ -196,7 +210,7 @@ def build_policies(
     return records
 
 
-# ─── Validation ───────────────────────────────────────────────────────────────
+# --- Validation ---------------------------------------------------------------
 
 def validate_policies(
     records: list[dict],
@@ -259,7 +273,7 @@ def validate_policies(
             )
 
 
-# ─── Entry point ──────────────────────────────────────────────────────────────
+# --- Entry point --------------------------------------------------------------
 
 def main() -> None:
     """Generate and save synthetic policies."""

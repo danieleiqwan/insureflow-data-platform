@@ -1,4 +1,4 @@
-"""generate_all.py — Full Phase 2B synthetic data pipeline.
+"""generate_all.py -- Full Phase 2B synthetic data pipeline.
 
 Runs the complete generation pipeline in dependency order:
   1. generate_policies  (reads customers.csv)
@@ -15,8 +15,14 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import sys
 import time
 from pathlib import Path
+
+# Ensure repository root is on sys.path when invoked directly as a script
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import pandas as pd
 
@@ -52,30 +58,30 @@ def main() -> None:
     t0 = time.monotonic()
 
     print("=" * 60)
-    print("InsureFlow Phase 2B — Full Generation Pipeline")
+    print("InsureFlow Phase 2B -- Full Generation Pipeline")
     print(f"Reference date : {REFERENCE_DATE}")
     print("=" * 60)
 
-    # ── Customers (read-only; must not be regenerated) ──────────────────────
+    # -- Customers (read-only; must not be regenerated) ----------------------
     customers_path = raw_dir / "customers.csv"
-    print(f"\n[0/3] Customers (existing)  →  {customers_path}")
+    print(f"\n[0/3] Customers (existing)  ->  {customers_path}")
     customers_df = pd.read_csv(customers_path, dtype=str)
     print(f"      Loaded {len(customers_df):,} customer rows")
 
-    # ── Facilities (read-only) ───────────────────────────────────────────────
+    # -- Facilities (read-only) -----------------------------------------------
     print("\n[  ] Loading facilities_master.csv...")
     facilities = load_facilities(raw_dir)
     print(f"      Loaded {len(facilities):,} facility rows")
 
-    # ── Step 1: Policies ────────────────────────────────────────────────────
+    # -- Step 1: Policies ----------------------------------------------------
     print("\n[1/3] Generating policies...")
     policy_records = build_policies(customers_df)
     validate_policies(policy_records, set(customers_df["customer_id"]))
     policy_path = raw_dir / "policies.csv"
     write_csv(policy_records, POLICY_COLUMNS, policy_path)
-    print(f"      {len(policy_records):,} policies  →  {policy_path}")
+    print(f"      {len(policy_records):,} policies  ->  {policy_path}")
 
-    # ── Step 2: Claims ──────────────────────────────────────────────────────
+    # -- Step 2: Claims ------------------------------------------------------
     print("\n[2/3] Generating claims...")
     policies_df = pd.read_csv(policy_path, dtype=str)
     claim_records = build_claims(policies_df, customers_df, facilities)
@@ -88,18 +94,18 @@ def main() -> None:
     )
     claim_path = raw_dir / "claims.csv"
     write_csv(claim_records, CLAIM_COLUMNS, claim_path)
-    print(f"      {len(claim_records):,} claims    →  {claim_path}")
+    print(f"      {len(claim_records):,} claims    ->  {claim_path}")
 
-    # ── Step 3: Payments ─────────────────────────────────────────────────────
+    # -- Step 3: Payments -----------------------------------------------------
     print("\n[3/3] Generating payments...")
     claims_df = pd.read_csv(claim_path, dtype=str)
     payment_records = build_payments(claims_df)
     validate_payments(payment_records, claims_df)
     payment_path = raw_dir / "payments.csv"
     write_csv(payment_records, PAYMENT_COLUMNS, payment_path)
-    print(f"      {len(payment_records):,} payments  →  {payment_path}")
+    print(f"      {len(payment_records):,} payments  ->  {payment_path}")
 
-    # ── Summary ──────────────────────────────────────────────────────────────
+    # -- Summary --------------------------------------------------------------
     elapsed = time.monotonic() - t0
     print("\n" + "=" * 60)
     print("GENERATION COMPLETE")

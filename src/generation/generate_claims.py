@@ -8,28 +8,34 @@ Claim rules:
 - claim_date ∈ [policy.start_date, min(policy.end_date, REFERENCE_DATE − 1 day)].
 - claim_type plausible for policy_type (see CLAIM_TYPE_MAP).
 - facility_id: 80% in customer's home state, 20% any state.
-  INPATIENT/EMERGENCY → HOSPITAL; OUTPATIENT → HOSPITAL|KLINIK; DENTAL → KLINIK PERGIGIAN.
+  INPATIENT/EMERGENCY -> HOSPITAL; OUTPATIENT -> HOSPITAL|KLINIK; DENTAL -> KLINIK PERGIGIAN.
 - claim_amount: lognormal distribution by claim_type (MYR).
 - status weights: APPROVED 60%, PARTIALLY_APPROVED 15%, REJECTED 15%, SUBMITTED 10%.
-  Recent claims (≤30 days before REFERENCE_DATE) are weighted 40% SUBMITTED.
+  Recent claims (<=30 days before REFERENCE_DATE) are weighted 40% SUBMITTED.
 - approved_amount: NULL if SUBMITTED; 0.00 if REJECTED; equals claim_amount if APPROVED;
-  40–95% of claim_amount if PARTIALLY_APPROVED.
+  40-95% of claim_amount if PARTIALLY_APPROVED.
 - created_at: seeded seconds after midnight UTC on claim_date.
 
 Claim-type per policy-type mapping
-────────────────────────────────────────────────────────────────────
-MEDICAL           → OUTPATIENT 60%, INPATIENT 30%, DENTAL 10%
-HOSPITALIZATION   → INPATIENT  70%, EMERGENCY  30%
-CRITICAL_ILLNESS  → INPATIENT 100%
-PERSONAL_ACCIDENT → OUTPATIENT 40%, EMERGENCY  40%, INPATIENT 20%
+--------------------------------------------------------------------
+MEDICAL           -> OUTPATIENT 60%, INPATIENT 30%, DENTAL 10%
+HOSPITALIZATION   -> INPATIENT  70%, EMERGENCY  30%
+CRITICAL_ILLNESS  -> INPATIENT 100%
+PERSONAL_ACCIDENT -> OUTPATIENT 40%, EMERGENCY  40%, INPATIENT 20%
 """
 
 from __future__ import annotations
 
 import random
+import sys
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
+
+# Ensure repository root is on sys.path when invoked directly as a script
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import pandas as pd
 
@@ -49,59 +55,83 @@ from src.generation.common import (
     write_csv,
 )
 
-# ─── Schema ───────────────────────────────────────────────────────────────────
+# --- Schema -------------------------------------------------------------------
 COLUMNS = [
     "claim_id", "policy_id", "facility_id", "claim_date",
     "claim_type", "claim_amount", "approved_amount", "status", "created_at",
 ]
 
-# ─── Enums ────────────────────────────────────────────────────────────────────
+# --- Enums --------------------------------------------------------------------
 VALID_CLAIM_TYPES  = {"OUTPATIENT", "INPATIENT", "EMERGENCY", "DENTAL"}
 VALID_STATUSES     = {"SUBMITTED", "APPROVED", "PARTIALLY_APPROVED", "REJECTED"}
 
-# ─── Claim-type per policy-type ───────────────────────────────────────────────
+# --- Claim-type per policy-type -----------------------------------------------
 # (claim_type_value, weight)
 CLAIM_TYPE_MAP: dict[str, list[tuple[str, float]]] = {
-    "MEDICAL":           [("OUTPATIENT", 0.60), ("INPATIENT", 0.30), ("DENTAL", 0.10)],
-    "HOSPITALIZATION":   [("INPATIENT",  0.70), ("EMERGENCY", 0.30)],
+    "MEDICAL":           [("OUTPATIENT", 0.55), ("INPATIENT", 0.35), ("DENTAL", 0.10)],
+    "HOSPITALIZATION":   [("INPATIENT",  0.75), ("EMERGENCY", 0.25)],
     "CRITICAL_ILLNESS":  [("INPATIENT",  1.00)],
-    "PERSONAL_ACCIDENT": [("OUTPATIENT", 0.40), ("EMERGENCY", 0.40), ("INPATIENT", 0.20)],
+    "PERSONAL_ACCIDENT": [("OUTPATIENT", 0.45), ("EMERGENCY", 0.45), ("INPATIENT", 0.10)],
 }
 
-# ─── Claim count distribution by policy_type ──────────────────────────────────
-# (n_claims_options, weights)
+# --- Claim count distribution by policy_type ----------------------------------
+# Target: ~0.30 claims per policy-year, with ~75% of policies having 0 claims.
 CLAIM_COUNT_MAP: dict[str, tuple[list[int], list[float]]] = {
-    "MEDICAL":           ([0, 1, 2, 3], [0.30, 0.40, 0.20, 0.10]),
-    "HOSPITALIZATION":   ([0, 1, 2],    [0.40, 0.40, 0.20]),
-    "CRITICAL_ILLNESS":  ([0, 1],       [0.50, 0.50]),
-    "PERSONAL_ACCIDENT": ([0, 1, 2],    [0.40, 0.40, 0.20]),
+    "MEDICAL":           ([0, 1, 2, 3], [0.63, 0.27, 0.08, 0.02]),
+    "HOSPITALIZATION":   ([0, 1, 2],    [0.73, 0.22, 0.05]),
+    "CRITICAL_ILLNESS":  ([0, 1],       [0.93, 0.07]),
+    "PERSONAL_ACCIDENT": ([0, 1, 2],    [0.86, 0.12, 0.02]),
 }
 
-# ─── Claim amount parameters (lognormal) ─────────────────────────────────────
-# (median MYR, sigma, min MYR, max MYR)
+# --- Claim amount parameters (lognormal) -------------------------------------
+# (median MYR, sigma, min MYR, max MYR) calibrated by policy_type and claim_type
+AMOUNT_PARAMS_BY_POLICY: dict[tuple[str, str], tuple[float, float, float, float]] = {
+    ("MEDICAL", "OUTPATIENT"):           (280.0,   0.70,   60.0,   1400.0),
+    ("MEDICAL", "INPATIENT"):            (12000.0, 0.75, 2500.0,  50000.0),
+    ("MEDICAL", "DENTAL"):               (350.0,   0.65,   80.0,   1800.0),
+    ("HOSPITALIZATION", "INPATIENT"):    (4200.0,  0.75, 1000.0,  22000.0),
+    ("HOSPITALIZATION", "EMERGENCY"):    (1300.0,  0.75,  300.0,   5500.0),
+    ("CRITICAL_ILLNESS", "INPATIENT"):   (26000.0, 0.40, 14000.0, 65000.0),
+    ("PERSONAL_ACCIDENT", "OUTPATIENT"): (220.0,   0.65,   50.0,    900.0),
+    ("PERSONAL_ACCIDENT", "EMERGENCY"):  (850.0,   0.70,  200.0,   3000.0),
+    ("PERSONAL_ACCIDENT", "INPATIENT"):  (3500.0,  0.70, 1000.0,  10000.0),
+}
+
 AMOUNT_PARAMS: dict[str, tuple[float, float, float, float]] = {
-    "OUTPATIENT": (150.0,  0.80,   50.0,   500.0),
-    "INPATIENT":  (5000.0, 1.00, 1000.0, 50000.0),
-    "EMERGENCY":  (2000.0, 0.90,  500.0, 15000.0),
-    "DENTAL":     (300.0,  0.70,   50.0,  2000.0),
+    "OUTPATIENT": (250.0,  0.70,   60.0,  1400.0),
+    "INPATIENT":  (7500.0, 0.80, 1000.0, 50000.0),
+    "EMERGENCY":  (1200.0, 0.75,  200.0,  6000.0),
+    "DENTAL":     (350.0,  0.65,   80.0,  1800.0),
 }
-
-# ─── Status weights ───────────────────────────────────────────────────────────
-_STATUS_NORMAL_VALUES  = ["SUBMITTED", "APPROVED", "PARTIALLY_APPROVED", "REJECTED"]
-_STATUS_NORMAL_WEIGHTS = [0.10, 0.60, 0.15, 0.15]
-
-_STATUS_RECENT_VALUES  = ["SUBMITTED", "APPROVED", "PARTIALLY_APPROVED", "REJECTED"]
-_STATUS_RECENT_WEIGHTS = [0.40, 0.40, 0.10, 0.10]
-
-_RECENT_DAYS = 30  # "recent" threshold
 
 
 def _derive_status(claim_date: date, rng: random.Random) -> str:
-    """Sample claim status, biasing toward SUBMITTED for recent claims."""
-    recent = (REFERENCE_DATE - claim_date).days <= _RECENT_DAYS
-    if recent:
-        return rng.choices(_STATUS_RECENT_VALUES, weights=_STATUS_RECENT_WEIGHTS, k=1)[0]
-    return rng.choices(_STATUS_NORMAL_VALUES, weights=_STATUS_NORMAL_WEIGHTS, k=1)[0]
+    """Sample claim status, ensuring historical claims (>30 days) are resolved,
+    while recent claims carry active SUBMITTED status, hitting the target mix:
+    ~10% SUBMITTED, ~60% APPROVED, ~15% PARTIALLY_APPROVED, ~15% REJECTED.
+    """
+    days_ago = (REFERENCE_DATE - claim_date).days
+    if days_ago <= 14:
+        # Active adjudication window
+        return rng.choices(
+            ["SUBMITTED", "APPROVED", "PARTIALLY_APPROVED", "REJECTED"],
+            weights=[0.42, 0.38, 0.10, 0.10],
+            k=1,
+        )[0]
+    elif days_ago <= 30:
+        # Transition window
+        return rng.choices(
+            ["SUBMITTED", "APPROVED", "PARTIALLY_APPROVED", "REJECTED"],
+            weights=[0.12, 0.58, 0.15, 0.15],
+            k=1,
+        )[0]
+    else:
+        # Historical claims (> 30 days) are fully settled
+        return rng.choices(
+            ["APPROVED", "PARTIALLY_APPROVED", "REJECTED"],
+            weights=[0.67, 0.165, 0.165],
+            k=1,
+        )[0]
 
 
 def _derive_approved_amount(
@@ -114,12 +144,12 @@ def _derive_approved_amount(
         return "0.00"
     if status == "APPROVED":
         return str(claim_amount)
-    # PARTIALLY_APPROVED: 40–95% of claim_amount
+    # PARTIALLY_APPROVED: 40-95% of claim_amount
     pct = Decimal(str(rng.uniform(0.40, 0.95)))
     return str(money(claim_amount * pct))
 
 
-# ─── Builder ──────────────────────────────────────────────────────────────────
+# --- Builder ------------------------------------------------------------------
 
 def build_claims(
     policies_df: pd.DataFrame,
@@ -142,7 +172,7 @@ def build_claims(
     # Build facility pools once (sorted, deterministic)
     pools = build_facility_pools(facilities)
 
-    # Build customer_id → state lookup
+    # Build customer_id -> state lookup
     customer_state: dict[str, str] = dict(
         zip(customers_df["customer_id"], customers_df["state"])
     )
@@ -188,7 +218,9 @@ def build_claims(
             facility_id = sample_facility(claim_type, cust_state, pools, rng)
 
             # Amount
-            med, sig, lo, hi = AMOUNT_PARAMS[claim_type]
+            med, sig, lo, hi = AMOUNT_PARAMS_BY_POLICY.get(
+                (policy_type, claim_type), AMOUNT_PARAMS[claim_type]
+            )
             claim_amount = lognormal(med, sig, lo, hi, rng)
 
             # Status and approved_amount
@@ -213,7 +245,7 @@ def build_claims(
     return records
 
 
-# ─── Validation ───────────────────────────────────────────────────────────────
+# --- Validation ---------------------------------------------------------------
 
 def validate_claims(
     records: list[dict],
@@ -309,7 +341,7 @@ def validate_claims(
             )
 
 
-# ─── Entry point ──────────────────────────────────────────────────────────────
+# --- Entry point --------------------------------------------------------------
 
 def main() -> None:
     """Generate and save synthetic claims."""
