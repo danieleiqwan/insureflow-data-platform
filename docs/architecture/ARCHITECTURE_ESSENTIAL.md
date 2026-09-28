@@ -2,7 +2,7 @@
 
 One-page summary for quick orientation. Full detail: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
-**Current phase: 2A — Facility Data Source Acquisition.** Only Phase 1 and current Phase 2A items are implemented. Everything else is planned.
+**Current phase: 2B — Synthetic Policies, Claims, and Payments.** Phase 1, Phase 2A, and Phase 2B are implemented. Everything else is planned.
 
 ## What it is
 Portfolio Data Engineering project (`insureflow-data-platform`, path: `C:\Users\User\Projects\insureflow-data-platform`): Malaysian healthcare data + synthetic insurance data → medallion pipeline → PostgreSQL warehouse → Power BI.
@@ -12,27 +12,29 @@ Data Sources → Ingestion → Bronze → Silver → Data Quality → Gold → P
 
 | Stage | Status |
 |---|---|
-| Sources (customer generator) | Phase 1 |
-| Postgres container + base schema | Phase 1 |
+| Sources (customer, policy, claim, payment generators; MOH facility data) | Implemented (Phase 1, 2A, 2B) |
+| Postgres container + relational schema (5 tables) | Implemented (Phase 1 & 2B) |
 | Ingestion, Bronze, Silver, DQ, Gold, Power BI | Planned |
 | dbt, Airflow, MinIO, incremental, monitoring, cloud | Planned / tentative |
 
-## Phase 1 stack
+## Stack
 Python 3.12+ (`venv`, `requirements.txt`, `requirements-dev.txt`, `pytest.ini`) · pandas · Faker · python-dotenv · psycopg2-binary · pytest · PostgreSQL 16 (pinned, Docker Compose, default host port 5433) · Git
 
-## Phase 1 data model
-`customers` → `policies` → `claims` → `payments` (each links to the previous via FK with `ON DELETE RESTRICT`, see ADR-009).
+## Data model
+- `facilities` (MOH `KOD_FASILITI` PK)
+- `customers` → `policies` → `claims` → `payments` (each links via FK with `ON DELETE RESTRICT`, see ADR-009).
+- `claims.facility_id` is a `NOT NULL` FK to `facilities.facility_id` (see ADR-010, supersedes ADR-007).
 - IDs are prefixed strings: `C000001`, `P0000001`, `CL0000001`, `PM0000001`.
 - Money is `NUMERIC(12,2)`. `created_at` is `TIMESTAMPTZ DEFAULT now()`.
-- `CHECK` constraints on gender/status/type columns; `end_date >= start_date`; non-negative amounts and `approved_amount <= claim_amount`.
-- Foreign keys use `ON DELETE RESTRICT` to prevent accidental cascading deletion of parent records.
-- `claims.facility_id` is a plain column until real facility data arrives.
-- Policies, claims, payments are **empty tables** in Phase 1.
+- `CHECK` constraints on status/type columns; `end_date >= start_date`; non-negative amounts and `approved_amount <= claim_amount`.
+- Foreign keys use `ON DELETE RESTRICT` and are indexed.
+- Tables in PostgreSQL are created via `sql/init.sql`.
 
 ## Synthetic data rules
-- One fixed seed for `random` and Faker; **no wall-clock fields**; same seed → byte-identical CSV.
+- Fixed base seed + generator offsets for independent `random.Random` instances; **no wall-clock fields**; byte-identical CSVs.
 - Curated Malay/Chinese/Indian name lists, ~30 Malaysian occupations, 13 states + 3 Federal Territories, age 18–65.
-- Output: `data/raw/customers.csv` (1,000 rows, tracked in Git).
+- Real public facilities sampled from `data/raw/facilities_master.csv` with state preference.
+- Outputs in `data/raw/`: `customers.csv` (1,000), `policies.csv` (1,379), `claims.csv` (1,059), `payments.csv` (814). Tracked in Git.
 
 ## Where things go
 | Path | Purpose |

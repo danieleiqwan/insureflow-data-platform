@@ -39,6 +39,11 @@ data/sample/*
 # Explicitly keep Phase 1 baseline customer dataset
 !data/raw/customers.csv
 
+# Explicitly keep Phase 2B synthetic datasets (<150 KB each)
+!data/raw/policies.csv
+!data/raw/claims.csv
+!data/raw/payments.csv
+
 # Scratch / local working directory — not committed
 scratch/
 

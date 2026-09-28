@@ -150,9 +150,9 @@ erDiagram
 - `CHECK (end_date >= start_date)` on `policies`.
 - Non-negative `CHECK` constraints: `premium >= 0` on `policies`, `claim_amount >= 0` and `approved_amount >= 0` on `claims`, `amount >= 0` on `payments`.
 - `CHECK (approved_amount <= claim_amount)` on `claims`.
-- Referential integrity: All foreign keys (`policies.customer_id`, `claims.policy_id`, `payments.claim_id`) enforce `ON DELETE RESTRICT` (see ADR-009) to preserve audit trails.
-- Indexes on all foreign-key columns (`idx_policies_customer_id`, `idx_claims_policy_id`, `idx_payments_claim_id`).
-- `claims.facility_id` is a plain column in Phase 1. It becomes a reference to the real facility dimension when the healthcare dataset is introduced.
+- Referential integrity: All foreign keys (`policies.customer_id`, `claims.policy_id`, `claims.facility_id`, `payments.claim_id`) enforce `ON DELETE RESTRICT` (see ADR-009, ADR-010) to preserve audit trails.
+- Indexes on all foreign-key columns (`idx_policies_customer_id`, `idx_claims_policy_id`, `idx_claims_facility_id`, `idx_payments_claim_id`).
+- `claims.facility_id` is a `NOT NULL` foreign key referencing `facilities(facility_id)` (Phase 2B, ADR-010 superseding ADR-007).
 
 ### 5.2 Proposed enumerations (finalise in the SQL script)
 
@@ -301,9 +301,10 @@ Introduced with Silver. Principles decided now so later work stays consistent:
 | ADR-004 | Deterministic generation via fixed seed, no wall-clock fields | Reproducible datasets and tests | Accepted |
 | ADR-005 | Prefixed string IDs (`C000001`) | Human-readable, predictable | Accepted |
 | ADR-006 | Phase 1 tables in `public`; warehouse layering decided in Bronze phase | Avoid premature schema design | Open |
-| ADR-007 | `facility_id` is a plain column until facility data is introduced | Real dataset arrives later | Accepted |
+| ADR-007 | `facility_id` is a plain column until facility data is introduced | Real dataset arrives later | Superseded by ADR-010 |
 | ADR-008 | Curated name/occupation lists instead of Faker defaults | Faker defaults are not realistically Malaysian | Accepted |
 | ADR-009 | `ON DELETE RESTRICT` on all foreign key constraints | In insurance/financial systems, accidental cascading deletes of parent entities (customers, policies, claims) silently wipe audit trails and violate regulatory/data integrity requirements. Parent records must not be deleted while active child references exist. | Accepted |
+| ADR-010 | Real facility IDs from MOH master as PK and claims FK | Sourced from Ministry of Health Malaysia (`KOD_FASILITI`). Establishes referential integrity on `claims.facility_id` with `ON DELETE RESTRICT`, `NOT NULL`, and indexing. Supersedes ADR-007. | Accepted |
 
 ## 16. Conventions
 

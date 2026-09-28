@@ -16,7 +16,7 @@ Target flow: Data Sources → Ingestion → Bronze → Silver → Data Quality �
 
 ## Current phase
 
-> **CURRENT PHASE: 2A — Facility Data Source Acquisition**
+> **CURRENT PHASE: 2B — Synthetic Policies, Claims, and Payments**
 
 ### Phase rules (strict)
 

@@ -1,10 +1,40 @@
--- InsureFlow Phase 1 Relational Schema
--- Source-system model: customers, policies, claims, payments
+-- InsureFlow Phase 2B Relational Schema
+-- Source-system model: facilities, customers, policies, claims, payments
+-- Supersedes Phase 1 schema; init scripts run only on an empty volume.
 
 DROP TABLE IF EXISTS payments CASCADE;
 DROP TABLE IF EXISTS claims CASCADE;
 DROP TABLE IF EXISTS policies CASCADE;
 DROP TABLE IF EXISTS customers CASCADE;
+DROP TABLE IF EXISTS facilities CASCADE;
+
+-- 0. Facilities Table (Phase 2B)
+--    Source: MOH Malaysia facilities_master.csv (KOD_FASILITI)
+--    ADR-010: Real facility codes are used as the PK so that claims.facility_id
+--             carries a traceable, government-issued identifier rather than a
+--             surrogate key. Supersedes ADR-007.
+CREATE TABLE facilities (
+    facility_id         VARCHAR(15)     PRIMARY KEY,
+    facility_name       VARCHAR(200)    NOT NULL,
+    facility_category   VARCHAR(50)     NOT NULL,
+    facility_type       VARCHAR(100)    NOT NULL,
+    subsector           VARCHAR(10)     NOT NULL,
+    state               VARCHAR(60)     NOT NULL,
+    district            VARCHAR(60)     NOT NULL,
+    postcode            VARCHAR(10),
+    latitude            NUMERIC(9,6)    NOT NULL,
+    longitude           NUMERIC(9,6)    NOT NULL,
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT chk_facilities_category CHECK (
+        facility_category IN (
+            'HOSPITAL', 'KLINIK', 'KLINIK PERGIGIAN',
+            'PEJABAT KESIHATAN', 'PEJABAT KESIHATAN PERGIGIAN',
+            'LAIN-LAIN', 'PUSAT PROMOSI KESIHATAN',
+            'INSTITUSI', 'JABATAN KESIHATAN NEGERI', 'MAKMAL', 'PEJABAT FARMASI'
+        )
+    ),
+    CONSTRAINT chk_facilities_subsector CHECK (subsector IN ('KKM', 'KPT', 'ATM'))
+);
 
 -- 1. Customers Table
 CREATE TABLE customers (
@@ -43,11 +73,11 @@ CREATE TABLE policies (
 
 CREATE INDEX idx_policies_customer_id ON policies(customer_id);
 
--- 3. Claims Table
+-- 3. Claims Table (Phase 2B: facility_id is NOT NULL FK to facilities)
 CREATE TABLE claims (
     claim_id        VARCHAR(9)      PRIMARY KEY,
     policy_id       VARCHAR(8)      NOT NULL,
-    facility_id     VARCHAR(50),
+    facility_id     VARCHAR(15)     NOT NULL,
     claim_date      DATE            NOT NULL,
     claim_type      VARCHAR(50)     NOT NULL,
     claim_amount    NUMERIC(12,2)   NOT NULL,
@@ -56,6 +86,8 @@ CREATE TABLE claims (
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     CONSTRAINT fk_claims_policy_id FOREIGN KEY (policy_id)
         REFERENCES policies(policy_id) ON DELETE RESTRICT,
+    CONSTRAINT fk_claims_facility_id FOREIGN KEY (facility_id)
+        REFERENCES facilities(facility_id) ON DELETE RESTRICT,
     CONSTRAINT chk_claims_amounts CHECK (
         claim_amount >= 0 AND (
             approved_amount IS NULL OR (
@@ -72,6 +104,7 @@ CREATE TABLE claims (
 );
 
 CREATE INDEX idx_claims_policy_id ON claims(policy_id);
+CREATE INDEX idx_claims_facility_id ON claims(facility_id);
 
 -- 4. Payments Table
 CREATE TABLE payments (
