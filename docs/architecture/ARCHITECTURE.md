@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft v0.1 |
-| **Current phase** | Phase 2A — Facility Data Source Acquisition |
+| **Current phase** | Phase 3 — Ingestion + Bronze |
 | **Short version** | See [`ARCHITECTURE_ESSENTIAL.md`](./ARCHITECTURE_ESSENTIAL.md) |
 
 **Status legend:** **[Implemented]** exists in the repo · **[Planned]** agreed direction, not built · **[Tentative]** idea, may change.
@@ -31,23 +31,24 @@ flowchart LR
 
 | Stage | Purpose | Status |
 |---|---|---|
-| Data Sources | Synthetic generators, data.gov.my, MOH facility data | Customers generator **[Implemented in Phase 1]**; rest **[Planned]** |
-| Ingestion | Load sources into the platform without changing content | **[Planned]** |
-| Bronze | Raw, append-only copy plus ingestion metadata | **[Planned]** |
+| Data Sources | Synthetic generators, MOH facility registry | Implemented (Phase 1, 2A, 2B) |
+| Ingestion | Load raw sources via psycopg2 COPY with audit logging | **[Implemented in Phase 3]** |
+| Bronze | Raw, append-only tables in `bronze` schema with metadata | **[Implemented in Phase 3]** |
 | Silver | Cleaned, typed, deduplicated, conformed | **[Planned]** |
 | Data Quality | Rule checks, thresholds, quarantine of bad rows, reports | **[Planned]** |
 | Gold | Business-ready dimensional model | **[Planned]** |
-| PostgreSQL Warehouse | Serves Gold to BI | Postgres container **[Implemented in Phase 1]**; warehouse modelling **[Planned]** |
+| PostgreSQL Warehouse | Serves Gold to BI; hosts `bronze` and relational schemas | **[Implemented]** (Docker Compose) |
 | Power BI | Dashboards | **[Planned]** |
 
 Later additions: dbt, Airflow, MinIO (S3-compatible), incremental processing, monitoring, optional Azure/Databricks concepts **[Tentative]**.
 
 ## 3. Layer Definitions (contract for future phases)
 
-### Bronze **[Planned]**
-- Stores data **as received**; no business logic, no type coercion beyond what the file format forces.
-- Adds metadata columns: `_ingested_at`, `_source`, `_batch_id` (names may be refined in the Bronze phase).
-- Append-only; reprocessing never mutates history.
+### Bronze **[Implemented in Phase 3]**
+- Stores data **as received** in dedicated `bronze` schema; all business columns are `TEXT`. No deduplication, no business cleaning, no type coercion.
+- Metadata columns on every table: `_batch_id` (UUID), `_source_file` (TEXT), `_source_row_number` (INT), `_ingested_at` (TIMESTAMPTZ NOT NULL DEFAULT now()).
+- Append-only; normal operations never UPDATE or DELETE rows in bronze.
+- Audit logging via `bronze.ingestion_log` with SHA256 checksums, row counts, execution duration, and SUCCESS/FAILED status. Idempotent skip on unchanged files unless `--force` is passed.
 
 ### Silver **[Planned]**
 - Enforces types, trims/standardises text, handles nulls, removes duplicates.
@@ -318,12 +319,14 @@ Introduced with Silver. Principles decided now so later work stays consistent:
 | ADR-003 | `NUMERIC(12,2)` for money | Avoid floating-point error | Accepted |
 | ADR-004 | Deterministic generation via fixed seed, no wall-clock fields | Reproducible datasets and tests | Accepted |
 | ADR-005 | Prefixed string IDs (`C000001`) | Human-readable, predictable | Accepted |
-| ADR-006 | Phase 1 tables in `public`; warehouse layering decided in Bronze phase | Avoid premature schema design | Open |
+| ADR-006 | Phase 1 tables in `public`; warehouse layering decided in Bronze phase | Avoid premature schema design | Superseded by ADR-013 |
 | ADR-007 | `facility_id` is a plain column until facility data is introduced | Real dataset arrives later | Superseded by ADR-010 |
 | ADR-008 | Curated name/occupation lists instead of Faker defaults | Faker defaults are not realistically Malaysian | Accepted |
 | ADR-009 | `ON DELETE RESTRICT` on all foreign key constraints | In insurance/financial systems, accidental cascading deletes of parent entities (customers, policies, claims) silently wipe audit trails and violate regulatory/data integrity requirements. Parent records must not be deleted while active child references exist. | Accepted |
 | ADR-010 | Real facility IDs from MOH master as PK and claims FK | Sourced from Ministry of Health Malaysia (`KOD_FASILITI`). Establishes referential integrity on `claims.facility_id` with `ON DELETE RESTRICT`, `NOT NULL`, and indexing. Supersedes ADR-007. | Accepted |
 | ADR-011 | Omit CHECK constraints on externally sourced facility category/subsector | External government registries (MOH) can introduce new categories or subsectors over time. Hardcoded CHECK constraints at the database ingestion boundary would fail upstream loads. Validation and conformance belong to the Data Quality phase (Silver layer) rather than raw DDL. Columns remain `NOT NULL`. | Accepted |
+| ADR-012 | Bronze layer schema & ingestion design | All business columns stored as untyped `TEXT` to capture raw source data verbatim. Metadata columns (`_batch_id`, `_source_file`, `_source_row_number`, `_ingested_at`) track provenance and load order. Append-only persistence (no updates/deletes). Ingestion via single-transaction `COPY` with file SHA256 idempotency checks and audit logging in `bronze.ingestion_log`. | Accepted |
+| ADR-013 | Medallion multi-schema layout in PostgreSQL & ADR-006 resolution | Single PostgreSQL database with dedicated schemas for medallion stages: `bronze` created in Phase 3; `silver` and `gold` deferred to Phases 4 and 5. The existing `public.*` relational tables created in Phase 1/2B remain untouched in Phase 3 (left unpopulated) and serve as a baseline candidate contract for the Silver layer to be decided in Phase 4. Supersedes ADR-006. | Accepted |
 
 ## 16. Conventions
 

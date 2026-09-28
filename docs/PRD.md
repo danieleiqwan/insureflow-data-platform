@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft v0.1 |
 | **Owner** | Daniel |
-| **Current phase** | Phase 2A — Facility Data Source Acquisition |
+| **Current phase** | Phase 3 — Ingestion + Bronze |
 | **Last updated** | 2026-09-28 |
 
 > Status legend used across the docs: **[Implemented]** exists in the repo, **[Planned]** agreed direction but not built, **[Tentative]** idea, may change.
@@ -56,8 +56,8 @@ Phase order after Phase 1 is **[Tentative]** and can be re-prioritised. Only Pha
 | 1 | Project Foundation | Repo structure, venv, Postgres in Docker, base schema, 1,000-customer generator, README | **[Implemented]** |
 | 2A | Facility Data Source Acquisition | Download & profile real Malaysian healthcare facility data (MOH/data.gov.my); evaluate candidate datasets for facility IDs | **[Implemented]** |
 | 2B | Synthetic Insurance Data Expansion | Policy, claim, payment generators; link claims to selected facility reference | **[Implemented]** |
-| 3 | Ingestion + Bronze | Load raw sources as-is with ingestion metadata | Tentative |
-| 4 | Silver + Data Quality | Cleaning, typing, dedupe, conformance; DQ checks and reporting | Tentative |
+| 3 | Ingestion + Bronze | Load raw sources as-is with ingestion metadata into `bronze` schema; COPY runner & audit log | **[Implemented]** |
+| 4 | Silver + Data Quality | Cleaning, typing, dedupe, conformance; DQ checks and reporting | Planned |
 | 5 | Gold + Warehouse | Dimensional model in PostgreSQL | Tentative |
 | 6 | Analytics | Power BI dashboards on Gold | Tentative |
 | 7 | Transformation Framework + Orchestration | dbt models/tests, Airflow DAGs | Tentative |

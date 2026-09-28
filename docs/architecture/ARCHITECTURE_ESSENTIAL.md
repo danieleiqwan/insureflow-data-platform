@@ -2,7 +2,7 @@
 
 One-page summary for quick orientation. Full detail: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
-**Current phase: 2B — Synthetic Policies, Claims, and Payments.** Phase 1, Phase 2A, and Phase 2B are implemented. Everything else is planned.
+**Current phase: 3 — Ingestion + Bronze.** Phase 1, Phase 2A, Phase 2B, and Phase 3 are implemented. Everything else is planned.
 
 ## What it is
 Portfolio Data Engineering project (`insureflow-data-platform`, path: `C:\Users\User\Projects\insureflow-data-platform`): Malaysian healthcare data + synthetic insurance data → medallion pipeline → PostgreSQL warehouse → Power BI.
@@ -13,35 +13,32 @@ Data Sources → Ingestion → Bronze → Silver → Data Quality → Gold → P
 | Stage | Status |
 |---|---|
 | Sources (customer, policy, claim, payment generators; MOH facility data) | Implemented (Phase 1, 2A, 2B) |
-| Postgres container + relational schema (5 tables) | Implemented (Phase 1 & 2B) |
-| Ingestion, Bronze, Silver, DQ, Gold, Power BI | Planned |
+| Ingestion & Bronze layer (`bronze` schema, audit logging, COPY transactions) | Implemented (Phase 3) |
+| Postgres container + relational schema (5 public tables) | Implemented (Phase 1 & 2B) |
+| Silver, DQ, Gold, Power BI | Planned |
 | dbt, Airflow, MinIO, incremental, monitoring, cloud | Planned / tentative |
 
 ## Stack
 Python 3.12+ (`venv`, `requirements.txt`, `requirements-dev.txt`, `pytest.ini`) · pandas · Faker · python-dotenv · psycopg2-binary · pytest · PostgreSQL 16 (pinned, Docker Compose, default host port 5433) · Git
 
-## Data model
-- `facilities` (MOH `KOD_FASILITI` PK)
-- `customers` → `policies` → `claims` → `payments` (each links via FK with `ON DELETE RESTRICT`, see ADR-009).
-- `claims.facility_id` is a `NOT NULL` FK to `facilities.facility_id` (see ADR-010, supersedes ADR-007).
-- IDs are prefixed strings: `C000001`, `P0000001`, `CL0000001`, `PM0000001`.
-- Money is `NUMERIC(12,2)`. `created_at` is `TIMESTAMPTZ DEFAULT now()`.
-- `CHECK` constraints on status/type columns; `end_date >= start_date`; non-negative amounts and `approved_amount <= claim_amount`.
-- Foreign keys use `ON DELETE RESTRICT` and are indexed.
-- Tables in PostgreSQL are created via `sql/init.sql`.
+## Data model & Schemas
+- **Warehouse Schemas:** PostgreSQL uses separate schemas for medallion layers. `bronze` is implemented in Phase 3; `silver` and `gold` will be added in Phases 4 and 5 (see ADR-013).
+- **Bronze schema (`bronze.*`):** Tables `customers`, `policies`, `claims`, `payments`, `facilities_master`. All source business fields are `TEXT`. Metadata: `_batch_id` (UUID), `_source_file` (TEXT), `_source_row_number` (INT), `_ingested_at` (TIMESTAMPTZ NOT NULL DEFAULT now()). Audit log: `bronze.ingestion_log`. Append-only (see ADR-012).
+- **Public relational schema (`public.*`):** Source relational baseline (`facilities`, `customers`, `policies`, `claims`, `payments`). PKs, FKs with `ON DELETE RESTRICT` (ADR-009, ADR-010), `NUMERIC(12,2)` money, `CHECK` constraints. Left unpopulated in Phase 3 as candidate Silver contract for Phase 4.
 
 ## Synthetic data rules
 - Fixed base seed + generator offsets for independent `random.Random` instances; **no wall-clock fields**; byte-identical CSVs.
 - Curated Malay/Chinese/Indian name lists, ~30 Malaysian occupations, 13 states + 3 Federal Territories, age 18–65.
 - Real public facilities sampled from `data/raw/facilities_master.csv` with state preference.
-- Outputs in `data/raw/`: `customers.csv` (1,000), `policies.csv` (1,379), `claims.csv` (1,059), `payments.csv` (814). Tracked in Git.
+- Outputs in `data/raw/`: `customers.csv` (1,000), `policies.csv` (1,379), `claims.csv` (423), `payments.csv` (364), `facilities_master.csv` (5,160).
 
 ## Where things go
 | Path | Purpose |
 |---|---|
-| `src/generation/` | Synthetic data generators (Phase 1 uses this only) |
-| `src/ingestion/`, `transformation/`, `quality/` | Empty until their phases |
-| `sql/` | From-scratch DDL (`init.sql`), mounted into Postgres init dir |
+| `src/generation/` | Synthetic data generators (Phase 1 & 2B) |
+| `src/ingestion/` | Source acquisition (`download_sources.py`) and Bronze COPY loader (`ingest_bronze.py`) |
+| `src/transformation/`, `quality/` | Empty until their phases |
+| `sql/` | From-scratch DDL (`bronze.sql`, `init.sql`), mounted into Postgres init dir |
 | `data/raw/` | Generated/ingested source files |
 | `tests/` | Automated unit/property checks (`pytest`) |
 | `requirements.txt` | Runtime dependencies pinned |

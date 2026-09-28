@@ -16,13 +16,13 @@ Target flow: Data Sources → Ingestion → Bronze → Silver → Data Quality �
 
 ## Current phase
 
-> **CURRENT PHASE: 2B — Synthetic Policies, Claims, and Payments**
+> **CURRENT PHASE: 3 — Ingestion + Bronze**
 
 ### Phase rules (strict)
 
 - Work **only** on the current phase.
-- Do **not** implement Bronze/Silver/Gold pipelines, dbt, Airflow, Power BI, MinIO, Azure, or Databricks.
-- Do **not** insert generated data into PostgreSQL. The CSV is enough for Phase 1.
+- Do **not** implement Silver/Gold pipelines, Data Quality framework, dbt, Airflow, Power BI, MinIO, Azure, or Databricks.
+- Data may be loaded **only into the `bronze` schema** in Phase 3. Existing `public.*` tables remain untouched.
 - Do **not** start the next phase automatically. When the phase is complete, deliver the final report and **stop**.
 - If a task seems to require future-phase work, stop and ask.
 - Never describe planned work as implemented in the README or docs.
@@ -60,12 +60,13 @@ python src/generation/generate_customers.py
 
 | Path | Purpose |
 |---|---|
-| `src/generation/` | Synthetic data generators |
-| `src/ingestion/`, `src/transformation/`, `src/quality/` | Empty until their phases; keep `.gitkeep` |
-| `sql/` | From-scratch DDL scripts (`init.sql`) |
-| `data/raw/` | Generated/ingested files (`customers.csv` is tracked) |
+| `src/generation/` | Synthetic data generators (Phase 1 & 2B) |
+| `src/ingestion/` | `download_sources.py` (MOH fetch) + `ingest_bronze.py` (Bronze COPY loader) |
+| `src/transformation/`, `src/quality/` | Empty until their phases; keep `.gitkeep` |
+| `sql/` | From-scratch DDL scripts (`bronze.sql`, `init.sql`) |
+| `data/raw/` | Generated/ingested files (all 5 CSVs are tracked) |
 | `data/processed/`, `data/sample/` | Future outputs / small samples |
-| `tests/` | Automated checks (`test_generate_customers.py`) |
+| `tests/` | Automated checks (`test_generate_customers.py`, `test_generate_phase2b.py`, `test_ingest_bronze.py`) |
 | `docs/` | PRD and architecture docs |
 | `requirements.txt` | Core runtime dependencies pinned |
 | `requirements-dev.txt` | Development and testing dependencies (`pytest`) |
@@ -100,7 +101,7 @@ python src/generation/generate_customers.py
 - Index every foreign-key column.
 - Name constraints explicitly. Use lowercase snake_case.
 - Scripts in `sql/` must run cleanly on an empty database and be safe to re-run from scratch.
-- `claims.facility_id` is a plain column for now (no FK).
+- `claims.facility_id` is a `NOT NULL` FK to `facilities(facility_id)` using `ON DELETE RESTRICT` (ADR-010, implemented in Phase 2B).
 
 ## Docker rules
 
