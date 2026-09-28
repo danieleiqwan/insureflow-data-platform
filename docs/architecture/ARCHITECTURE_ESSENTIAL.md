@@ -2,7 +2,7 @@
 
 One-page summary for quick orientation. Full detail: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
-**Current phase: 1 — Project Foundation.** Only Phase 1 items are implemented. Everything else is planned.
+**Current phase: 2A — Facility Data Source Acquisition.** Only Phase 1 and current Phase 2A items are implemented. Everything else is planned.
 
 ## What it is
 Portfolio Data Engineering project (`insureflow-data-platform`, path: `C:\Users\User\Projects\insureflow-data-platform`): Malaysian healthcare data + synthetic insurance data → medallion pipeline → PostgreSQL warehouse → Power BI.

@@ -16,7 +16,7 @@ Target flow: Data Sources → Ingestion → Bronze → Silver → Data Quality �
 
 ## Current phase
 
-> **CURRENT PHASE: 1 — Project Foundation**
+> **CURRENT PHASE: 2A — Facility Data Source Acquisition**
 
 ### Phase rules (strict)
 

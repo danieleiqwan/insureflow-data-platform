@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft v0.1 |
 | **Owner** | Daniel |
-| **Current phase** | Phase 1 — Project Foundation |
+| **Current phase** | Phase 2A — Facility Data Source Acquisition |
 | **Last updated** | 2026-09-28 |
 
 > Status legend used across the docs: **[Implemented]** exists in the repo, **[Planned]** agreed direction but not built, **[Tentative]** idea, may change.
@@ -53,8 +53,9 @@ Phase order after Phase 1 is **[Tentative]** and can be re-prioritised. Only Pha
 
 | Phase | Name | Key deliverables | Status |
 |---|---|---|---|
-| 1 | Project Foundation | Repo structure, venv, Postgres in Docker, base schema, 1,000-customer generator, README | **In progress** |
-| 2 | Synthetic Data Expansion + Source Acquisition | Policy/claim/payment generators; download data.gov.my and MOH facility data | Tentative |
+| 1 | Project Foundation | Repo structure, venv, Postgres in Docker, base schema, 1,000-customer generator, README | **[Implemented]** |
+| 2A | Facility Data Source Acquisition | Download & profile real Malaysian healthcare facility data (MOH/data.gov.my); evaluate candidate datasets for facility IDs | **In progress** |
+| 2B | Synthetic Insurance Data Expansion | Policy, claim, payment generators; link claims to selected facility reference | Planned |
 | 3 | Ingestion + Bronze | Load raw sources as-is with ingestion metadata | Tentative |
 | 4 | Silver + Data Quality | Cleaning, typing, dedupe, conformance; DQ checks and reporting | Tentative |
 | 5 | Gold + Warehouse | Dimensional model in PostgreSQL | Tentative |

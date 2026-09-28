@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft v0.1 |
-| **Current phase** | Phase 1 — Project Foundation |
+| **Current phase** | Phase 2A — Facility Data Source Acquisition |
 | **Short version** | See [`ARCHITECTURE_ESSENTIAL.md`](./ARCHITECTURE_ESSENTIAL.md) |
 
 **Status legend:** **[Implemented]** exists in the repo · **[Planned]** agreed direction, not built · **[Tentative]** idea, may change.
@@ -280,7 +280,8 @@ Introduced with Silver. Principles decided now so later work stays consistent:
 | Phase | Architectural change |
 |---|---|
 | 1 | Repo skeleton, Postgres container, base schema, customer generator |
-| 2 | Additional generators; raw real datasets land in `data/raw/` |
+| 2A | Facility data source acquisition, profiling, and reference proposal |
+| 2B | Policy, claim, payment generators; link claims to facilities reference |
 | 3 | Ingestion code; Bronze layer with metadata |
 | 4 | Silver transformations; DQ framework |
 | 5 | Gold dimensional model in Postgres |

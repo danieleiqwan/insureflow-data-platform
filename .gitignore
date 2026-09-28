@@ -38,3 +38,12 @@ data/sample/*
 
 # Explicitly keep Phase 1 baseline customer dataset
 !data/raw/customers.csv
+
+# Scratch / local working directory — not committed
+scratch/
+
+# Phase 2A downloaded raw datasets — large files, download_sources.py is source of truth
+# (already covered by data/raw/* above; listed explicitly for clarity)
+data/raw/facilities_master.csv
+data/raw/bedutil_facility.csv
+data/raw/hospital_beds.csv
