@@ -75,12 +75,13 @@ Dimensional (star) model, tentatively:
 | Concern | Choice | Why | Status |
 |---|---|---|---|
 | Language | Python 3.12+ | Standard for DE; matches skills being demonstrated | **[Implemented]** |
-| Dependency management | `venv` + `requirements.txt` | Simple, universally understood; no need for Poetry/Pipenv | **[Implemented]** |
+| Dependency management | `venv` + `requirements.txt` + `requirements-dev.txt` | Simple, universally understood; separates runtime from test/dev dependencies | **[Implemented]** |
+| Test framework | `pytest` + `pytest.ini` | Automated property, count, and determinism verification | **[Implemented]** |
 | Data manipulation | pandas | Sufficient at this scale | **[Implemented]** |
 | Synthetic data | Faker (seeded) + curated lists | Reproducible; curated lists fix Faker's non-Malaysian defaults | **[Implemented]** |
 | Config | `python-dotenv` + `.env` | Secrets stay out of code and Git | **[Implemented]** |
 | DB driver | `psycopg2-binary` | Standard PostgreSQL driver | **[Implemented]** (dependency only in Phase 1) |
-| Database | PostgreSQL (pinned major version, e.g. 16) in Docker Compose | Free, realistic warehouse target | **[Implemented]** |
+| Database | PostgreSQL 16 (pinned) in Docker Compose (default host port 5433) | Free, realistic warehouse target; avoids default 5432 host collisions | **[Implemented]** |
 | Transformations | dbt | Industry-standard SQL transformations and tests | **[Planned]** |
 | Orchestration | Airflow | Industry-standard scheduling and dependency management | **[Planned]** |
 | Object storage | MinIO | Local S3-compatible storage, transferable to cloud | **[Planned]** |
@@ -147,8 +148,10 @@ erDiagram
 - `NOT NULL` on every column that must always exist.
 - `CHECK` constraints for enumerated values (`gender`, all `status` columns, types).
 - `CHECK (end_date >= start_date)` on `policies`.
-- `CHECK (approved_amount <= claim_amount)` and non-negative amounts on `claims`.
-- Indexes on all foreign-key columns.
+- Non-negative `CHECK` constraints: `premium >= 0` on `policies`, `claim_amount >= 0` and `approved_amount >= 0` on `claims`, `amount >= 0` on `payments`.
+- `CHECK (approved_amount <= claim_amount)` on `claims`.
+- Referential integrity: All foreign keys (`policies.customer_id`, `claims.policy_id`, `payments.claim_id`) enforce `ON DELETE RESTRICT` (see ADR-009) to preserve audit trails.
+- Indexes on all foreign-key columns (`idx_policies_customer_id`, `idx_claims_policy_id`, `idx_payments_claim_id`).
 - `claims.facility_id` is a plain column in Phase 1. It becomes a reference to the real facility dimension when the healthcare dataset is introduced.
 
 ### 5.2 Proposed enumerations (finalise in the SQL script)
@@ -186,6 +189,8 @@ Only the customer format is implemented in Phase 1; the others are the conventio
 
 ## 8. Repository Layout
 
+Project workspace: `C:\Users\User\Projects\insureflow-data-platform` (`insureflow-data-platform`).
+
 ```
 insureflow-data-platform/
 ├── README.md
@@ -195,6 +200,8 @@ insureflow-data-platform/
 ├── .env.example
 ├── docker-compose.yml
 ├── requirements.txt
+├── requirements-dev.txt   # dev & test dependencies (pytest)
+├── pytest.ini             # pytest root configuration
 ├── data/
 │   ├── raw/               # generated/ingested source files (customers.csv tracked)
 │   ├── processed/         # future pipeline outputs
@@ -204,8 +211,8 @@ insureflow-data-platform/
 │   ├── generation/        # synthetic data generators
 │   ├── transformation/    # future
 │   └── quality/           # future
-├── sql/                   # schema and DDL scripts
-├── tests/
+├── sql/                   # schema and DDL scripts (init.sql)
+├── tests/                 # automated test suite (pytest)
 ├── notebooks/
 └── docs/
     ├── PRD.md
@@ -222,25 +229,29 @@ insureflow-data-platform/
 | `src/ingestion/` | Move data from sources into Bronze. Empty in Phase 1. |
 | `src/transformation/` | Bronze → Silver → Gold logic. Empty in Phase 1. |
 | `src/quality/` | Data quality rules and reporting. Empty in Phase 1. |
-| `sql/` | Idempotent, from-scratch-runnable DDL. |
-| `tests/` | Automated checks (row count, uniqueness, determinism in Phase 1). |
+| `sql/` | Idempotent, from-scratch-runnable DDL (`init.sql`). |
+| `tests/` | Automated checks (row count, uniqueness, determinism in Phase 1 via `pytest`). |
+| `requirements.txt` | Core runtime dependencies pinned. |
+| `requirements-dev.txt` | Dev/test dependencies pinned (`pytest`). |
+| `pytest.ini` | Python path configuration for `pytest` root discovery. |
 
 ## 9. Configuration and Secrets
 
 - Configuration is read from environment variables, loaded via `python-dotenv`.
 - `.env.example` is committed with placeholder values only; `.env` is git-ignored.
-- Variables: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`.
+- Variables: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT` (default: `5433`).
 - No credentials in code, SQL, Compose files, README, or Git history.
 
 ## 10. Docker / PostgreSQL
 
-- Image pinned to a specific major version (no `latest`).
+- Image pinned to a specific major version (`postgres:16-alpine`, no `latest`).
 - Container name: `insureflow-postgres`; Compose service: `postgres`.
-- Named volume for persistence.
+- Named volume for persistence (`insureflow_postgres_data`).
 - `restart: unless-stopped`.
 - Health check using `pg_isready`.
-- Port published as `127.0.0.1:${POSTGRES_PORT}:5432` so it is not exposed to the network.
-- `sql/` mounted into `/docker-entrypoint-initdb.d/`. Init scripts run **only when the data volume is empty**. To recreate from scratch: `docker compose down -v && docker compose up -d`.
+- Host port bound to `127.0.0.1:${POSTGRES_PORT:-5433}:5432` (default host port 5433 avoids conflict with host Postgres installations on 5432).
+- `sql/` mounted into `/docker-entrypoint-initdb.d/`. Init scripts run **only when the data volume is empty**.
+- To recreate from scratch in Windows PowerShell: `docker compose down -v; docker compose up -d` (Bash: `docker compose down -v && docker compose up -d`).
 
 ## 11. Data Quality Strategy **[Planned]**
 
@@ -291,6 +302,7 @@ Introduced with Silver. Principles decided now so later work stays consistent:
 | ADR-006 | Phase 1 tables in `public`; warehouse layering decided in Bronze phase | Avoid premature schema design | Open |
 | ADR-007 | `facility_id` is a plain column until facility data is introduced | Real dataset arrives later | Accepted |
 | ADR-008 | Curated name/occupation lists instead of Faker defaults | Faker defaults are not realistically Malaysian | Accepted |
+| ADR-009 | `ON DELETE RESTRICT` on all foreign key constraints | In insurance/financial systems, accidental cascading deletes of parent entities (customers, policies, claims) silently wipe audit trails and violate regulatory/data integrity requirements. Parent records must not be deleted while active child references exist. | Accepted |
 
 ## 16. Conventions
 

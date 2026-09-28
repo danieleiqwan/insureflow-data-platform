@@ -4,7 +4,7 @@ Instructions for any AI coding agent working in this repository. Read this file 
 
 ## Project
 
-**InsureFlow — Insurance Data Platform** is a portfolio Data Engineering project processing Malaysian healthcare data and synthetic insurance data through a medallion pipeline into a PostgreSQL warehouse and Power BI.
+**InsureFlow — Insurance Data Platform** (`C:\Users\User\Projects\insureflow-data-platform`) is a portfolio Data Engineering project processing Malaysian healthcare data and synthetic insurance data through a medallion pipeline into a PostgreSQL warehouse and Power BI.
 
 Target flow: Data Sources → Ingestion → Bronze → Silver → Data Quality → Gold → PostgreSQL → Power BI.
 
@@ -29,24 +29,30 @@ Target flow: Data Sources → Ingestion → Bronze → Silver → Data Quality �
 
 ## Setup commands
 
-```bash
-# Python environment (Python 3.12+)
+```powershell
+# Python environment (Python 3.12+) — Windows PowerShell
 python -m venv .venv
-source .venv/bin/activate          # Windows PowerShell: .venv\Scripts\Activate.ps1
+.venv\Scripts\Activate.ps1
+# (On Linux/macOS: source .venv/bin/activate)
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # Configuration
-cp .env.example .env               # then set a local password; never commit .env
+Copy-Item .env.example .env        # Linux/macOS: cp .env.example .env
+# Set a local password; default host port is 5433; never commit .env
 
 # Database
 docker compose up -d
 docker compose ps                  # wait for "healthy"
-docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"
+docker compose exec postgres psql -U insureflow_user -d insureflow -c "\dt"
 
 # Reset database from scratch (destroys data)
-docker compose down -v && docker compose up -d
+docker compose down -v; docker compose up -d
 
-# Generate data
+# Run automated tests
+pytest
+
+# Generate synthetic customer data
 python src/generation/generate_customers.py
 ```
 
@@ -56,11 +62,14 @@ python src/generation/generate_customers.py
 |---|---|
 | `src/generation/` | Synthetic data generators |
 | `src/ingestion/`, `src/transformation/`, `src/quality/` | Empty until their phases; keep `.gitkeep` |
-| `sql/` | From-scratch DDL scripts |
+| `sql/` | From-scratch DDL scripts (`init.sql`) |
 | `data/raw/` | Generated/ingested files (`customers.csv` is tracked) |
 | `data/processed/`, `data/sample/` | Future outputs / small samples |
-| `tests/` | Automated checks |
+| `tests/` | Automated checks (`test_generate_customers.py`) |
 | `docs/` | PRD and architecture docs |
+| `requirements.txt` | Core runtime dependencies pinned |
+| `requirements-dev.txt` | Development and testing dependencies (`pytest`) |
+| `pytest.ini` | Test configuration (`pythonpath = .`) |
 
 ## Code standards
 
@@ -69,7 +78,7 @@ python src/generation/generate_customers.py
 - Clear variable names. No unnecessary abstraction, classes, or frameworks.
 - Entry points use `if __name__ == "__main__":` and are runnable from the repo root.
 - Paths built with `pathlib`, resolved relative to the repo, never hardcoded absolute paths.
-- Dependencies limited to: `pandas`, `Faker`, `python-dotenv`, `psycopg2-binary` (plus `pytest` only if tests are added). **Ask before adding anything else.** Pin versions in `requirements.txt`.
+- Dependencies limited to: `pandas`, `Faker`, `python-dotenv`, `psycopg2-binary` in `requirements.txt`, plus `pytest` in `requirements-dev.txt`. **Ask before adding anything else.** Pin versions.
 
 ## Data generation rules
 
@@ -86,7 +95,8 @@ python src/generation/generate_customers.py
 - Money: `NUMERIC(12,2)`. Never floats.
 - `created_at`: `TIMESTAMPTZ NOT NULL DEFAULT now()`.
 - `NOT NULL` where the value must exist; `CHECK` constraints for enumerated values.
-- `CHECK (end_date >= start_date)` on policies; `CHECK (approved_amount <= claim_amount)` on claims.
+- `CHECK (end_date >= start_date)` on policies; non-negative amounts and `CHECK (approved_amount <= claim_amount)` on claims.
+- Foreign keys must use `ON DELETE RESTRICT` (see ADR-009) to preserve audit trails and avoid cascade deletes.
 - Index every foreign-key column.
 - Name constraints explicitly. Use lowercase snake_case.
 - Scripts in `sql/` must run cleanly on an empty database and be safe to re-run from scratch.
@@ -96,7 +106,7 @@ python src/generation/generate_customers.py
 
 - Pin the Postgres image to a specific major version. Never `latest`.
 - Container name `insureflow-postgres`. Named volume. `restart: unless-stopped`. `pg_isready` health check.
-- Bind the port to `127.0.0.1:${POSTGRES_PORT}:5432`.
+- Bind the port to `127.0.0.1:${POSTGRES_PORT:-5433}:5432` (host port defaults to 5433 to avoid conflicts with local PostgreSQL).
 - All credentials come from environment variables. No defaults containing real-looking secrets.
 
 ## Security and Git

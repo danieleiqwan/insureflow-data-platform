@@ -5,7 +5,7 @@ One-page summary for quick orientation. Full detail: [`ARCHITECTURE.md`](./ARCHI
 **Current phase: 1 — Project Foundation.** Only Phase 1 items are implemented. Everything else is planned.
 
 ## What it is
-Portfolio Data Engineering project: Malaysian healthcare data + synthetic insurance data → medallion pipeline → PostgreSQL warehouse → Power BI.
+Portfolio Data Engineering project (`insureflow-data-platform`, path: `C:\Users\User\Projects\insureflow-data-platform`): Malaysian healthcare data + synthetic insurance data → medallion pipeline → PostgreSQL warehouse → Power BI.
 
 ## Target flow
 Data Sources → Ingestion → Bronze → Silver → Data Quality → Gold → PostgreSQL → Power BI
@@ -18,13 +18,14 @@ Data Sources → Ingestion → Bronze → Silver → Data Quality → Gold → P
 | dbt, Airflow, MinIO, incremental, monitoring, cloud | Planned / tentative |
 
 ## Phase 1 stack
-Python 3.12+ (`venv`, `requirements.txt`) · pandas · Faker · python-dotenv · psycopg2-binary · PostgreSQL (pinned, Docker Compose) · Git
+Python 3.12+ (`venv`, `requirements.txt`, `requirements-dev.txt`, `pytest.ini`) · pandas · Faker · python-dotenv · psycopg2-binary · pytest · PostgreSQL 16 (pinned, Docker Compose, default host port 5433) · Git
 
 ## Phase 1 data model
-`customers` → `policies` → `claims` → `payments` (each links to the previous via FK).
+`customers` → `policies` → `claims` → `payments` (each links to the previous via FK with `ON DELETE RESTRICT`, see ADR-009).
 - IDs are prefixed strings: `C000001`, `P0000001`, `CL0000001`, `PM0000001`.
 - Money is `NUMERIC(12,2)`. `created_at` is `TIMESTAMPTZ DEFAULT now()`.
-- `CHECK` constraints on gender/status/type columns; `end_date >= start_date`; `approved_amount <= claim_amount`.
+- `CHECK` constraints on gender/status/type columns; `end_date >= start_date`; non-negative amounts and `approved_amount <= claim_amount`.
+- Foreign keys use `ON DELETE RESTRICT` to prevent accidental cascading deletion of parent records.
 - `claims.facility_id` is a plain column until real facility data arrives.
 - Policies, claims, payments are **empty tables** in Phase 1.
 
@@ -38,12 +39,15 @@ Python 3.12+ (`venv`, `requirements.txt`) · pandas · Faker · python-dotenv ·
 |---|---|
 | `src/generation/` | Synthetic data generators (Phase 1 uses this only) |
 | `src/ingestion/`, `transformation/`, `quality/` | Empty until their phases |
-| `sql/` | From-scratch DDL, mounted into Postgres init dir |
+| `sql/` | From-scratch DDL (`init.sql`), mounted into Postgres init dir |
 | `data/raw/` | Generated/ingested source files |
-| `tests/` | Row count, uniqueness, determinism checks |
+| `tests/` | Automated unit/property checks (`pytest`) |
+| `requirements.txt` | Runtime dependencies pinned |
+| `requirements-dev.txt` | Dev/test dependencies (`pytest`) |
+| `pytest.ini` | Pytest config (`pythonpath = .`) |
 
 ## Docker / Postgres
-Pinned image (no `latest`), container `insureflow-postgres`, named volume, `restart: unless-stopped`, `pg_isready` health check, port bound to `127.0.0.1`. Init scripts run only on an empty volume; reset with `docker compose down -v`.
+Pinned image (`postgres:16-alpine`), container `insureflow-postgres`, named volume, `restart: unless-stopped`, `pg_isready` health check, host port bound to `127.0.0.1:5433:5432` (default port 5433 via `POSTGRES_PORT:-5433`). Init scripts run only on an empty volume; reset in PowerShell with `docker compose down -v; docker compose up -d`.
 
 ## Non-negotiables
 1. No secrets in Git; config via `.env` (only `.env.example` committed).
