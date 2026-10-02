@@ -25,11 +25,14 @@ from src.ingestion.ingest_bronze import (
     ALL_SOURCES,
     FACILITIES_COLUMN_MAPPING,
     SOURCE_CONFIGS,
+    HeaderValidationError,
     compute_file_sha256,
     get_db_connection,
+    get_expected_table_columns,
     ingest_source,
     is_sha256_loaded,
     parse_args,
+    validate_header,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -100,6 +103,54 @@ def test_cli_parsing_custom(monkeypatch: pytest.MonkeyPatch) -> None:
     assert args.force is True
 
 
+def test_validate_header_success() -> None:
+    """Matching headers in identical order must pass without exception."""
+    cols = ["col_a", "col_b", "col_c"]
+    validate_header(actual_columns=cols, expected_columns=cols, table_name="test_tbl")
+
+
+def test_validate_header_order_differences_allowed() -> None:
+    """Headers with permuted column order must pass validation."""
+    actual = ["col_c", "col_a", "col_b"]
+    expected = ["col_a", "col_b", "col_c"]
+    validate_header(actual_columns=actual, expected_columns=expected, table_name="test_tbl")
+
+
+def test_validate_header_missing_columns() -> None:
+    """Missing columns must raise HeaderValidationError listing missing columns."""
+    actual = ["col_a"]
+    expected = ["col_a", "col_b", "col_c"]
+    with pytest.raises(HeaderValidationError) as exc_info:
+        validate_header(actual_columns=actual, expected_columns=expected, table_name="test_tbl")
+
+    err = str(exc_info.value)
+    assert "missing column(s): col_b, col_c" in err
+    assert exc_info.value.missing == ["col_b", "col_c"]
+
+
+def test_validate_header_extra_columns() -> None:
+    """Extra columns must raise HeaderValidationError listing extra columns."""
+    actual = ["col_a", "col_b", "col_c", "unexpected_col"]
+    expected = ["col_a", "col_b", "col_c"]
+    with pytest.raises(HeaderValidationError) as exc_info:
+        validate_header(actual_columns=actual, expected_columns=expected, table_name="test_tbl")
+
+    err = str(exc_info.value)
+    assert "extra column(s): unexpected_col" in err
+    assert exc_info.value.extra == ["unexpected_col"]
+
+
+def test_validate_header_duplicates() -> None:
+    """Duplicate columns must raise HeaderValidationError."""
+    actual = ["col_a", "col_b", "col_a"]
+    expected = ["col_a", "col_b"]
+    with pytest.raises(HeaderValidationError) as exc_info:
+        validate_header(actual_columns=actual, expected_columns=expected, table_name="test_tbl")
+
+    err = str(exc_info.value)
+    assert "duplicate column(s): col_a" in err
+
+
 # ─── Integration Tests (Isolated in bronze_test Schema) ───────────────────────
 
 @pytest.fixture(scope="module")
@@ -122,6 +173,38 @@ def db_conn() -> Generator[psycopg2.extensions.connection, None, None]:
     conn.close()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def guard_real_bronze_and_cleanup_test_schema(
+    db_conn: psycopg2.extensions.connection,
+) -> Generator[None, None, None]:
+    """Ensure real bronze schema tables and audit log are completely untouched by tests,
+    and verify bronze_test schema is dropped after test suite completion."""
+    tables = ["customers", "policies", "claims", "payments", "facilities_master", "ingestion_log"]
+    before = {}
+    with db_conn.cursor() as cur:
+        for t in tables:
+            cur.execute(f"SELECT COUNT(*) FROM bronze.{t}")
+            before[t] = cur.fetchone()[0]
+
+    yield
+
+    # Verification 1: Confirm bronze_test schema was completely dropped and leaves no residue
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'bronze_test'"
+        )
+        assert cur.fetchone()[0] == 0, "bronze_test schema was not cleaned up after tests!"
+
+    # Verification 2: Confirm real bronze tables and audit log were NEVER modified
+    with db_conn.cursor() as cur:
+        for t in tables:
+            cur.execute(f"SELECT COUNT(*) FROM bronze.{t}")
+            after = cur.fetchone()[0]
+            assert after == before[t], (
+                f"Real bronze.{t} was modified during tests! Before: {before[t]}, After: {after}"
+            )
+
+
 @pytest.fixture(scope="module")
 def test_schema(db_conn: psycopg2.extensions.connection) -> Generator[str, None, None]:
     """Create an isolated test schema with bronze tables, cleaning up afterwards."""
@@ -140,12 +223,13 @@ def test_schema(db_conn: psycopg2.extensions.connection) -> Generator[str, None,
             cur.execute(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE;")
             cur.execute(test_ddl)
 
-    yield schema_name
-
-    # Teardown: drop test schema completely
-    with db_conn:
-        with db_conn.cursor() as cur:
-            cur.execute(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE;")
+    try:
+        yield schema_name
+    finally:
+        # Teardown: drop test schema completely
+        with db_conn:
+            with db_conn.cursor() as cur:
+                cur.execute(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE;")
 
 
 @pytest.mark.integration
@@ -234,16 +318,17 @@ def test_integration_bronze_force_reload(
 
 
 @pytest.mark.integration
-def test_integration_bronze_failure_rollback(
+def test_integration_bronze_failure_missing_columns(
     db_conn: psycopg2.extensions.connection,
     test_schema: str,
 ) -> None:
-    """A failed COPY must roll back table rows and record FAILED in ingestion_log."""
+    """Original failure test restored: CSV with missing columns must fail header validation,
+    roll back any changes, and record FAILED in ingestion_log listing the missing columns."""
     with tempfile.TemporaryDirectory() as td:
         bad_dir = Path(td)
         bad_file = bad_dir / "customers.csv"
-        # Write malformed CSV with unknown column so COPY fails schema expectation
-        bad_file.write_text("customer_id,nonexistent_column\nC999,bad_val\n", encoding="utf-8")
+        # Missing columns: last_name, gender, date_of_birth, state, occupation, created_at
+        bad_file.write_text("customer_id,first_name\nC000001,Ahmad\n", encoding="utf-8")
 
         res = ingest_source(
             conn=db_conn,
@@ -255,9 +340,11 @@ def test_integration_bronze_failure_rollback(
 
         assert res["status"] == "FAILED"
         assert res["rows_loaded"] == 0
-        assert "FAILED" in res["message"]
+        assert "missing column(s):" in res["message"]
+        assert "last_name" in res["message"]
+        assert "created_at" in res["message"]
 
-        # Confirm failure was audited in ingestion_log
+        # Confirm failure was audited in ingestion_log with missing columns listed
         with db_conn.cursor() as cur:
             cur.execute(
                 f"SELECT status, error_message FROM {test_schema}.ingestion_log "
@@ -267,4 +354,96 @@ def test_integration_bronze_failure_rollback(
             log_row = cur.fetchone()
             assert log_row is not None
             assert log_row[0] == "FAILED"
-            assert log_row[1] is not None
+            assert "missing column(s):" in log_row[1]
+
+            # Confirm rollback: no rows inserted into customers table for this batch
+            cur.execute(
+                f"SELECT COUNT(*) FROM {test_schema}.customers WHERE _batch_id = %s",
+                (res["batch_id"],),
+            )
+            assert cur.fetchone()[0] == 0
+
+
+@pytest.mark.integration
+def test_integration_bronze_failure_nonexistent_column(
+    db_conn: psycopg2.extensions.connection,
+    test_schema: str,
+) -> None:
+    """Second separate test: CSV with nonexistent/extra column must fail header validation,
+    roll back any changes, and record FAILED in ingestion_log listing the extra column."""
+    with tempfile.TemporaryDirectory() as td:
+        bad_dir = Path(td)
+        bad_file = bad_dir / "customers.csv"
+        # CSV with a nonexistent/extra column
+        bad_file.write_text("customer_id,nonexistent_column\nC000001,bad_val\n", encoding="utf-8")
+
+        res = ingest_source(
+            conn=db_conn,
+            source_name="customers",
+            raw_dir=bad_dir,
+            force=True,
+            schema=test_schema,
+        )
+
+        assert res["status"] == "FAILED"
+        assert res["rows_loaded"] == 0
+        assert "extra column(s): nonexistent_column" in res["message"]
+
+        # Confirm failure was audited in ingestion_log with extra column listed
+        with db_conn.cursor() as cur:
+            cur.execute(
+                f"SELECT status, error_message FROM {test_schema}.ingestion_log "
+                "WHERE batch_id = %s",
+                (res["batch_id"],),
+            )
+            log_row = cur.fetchone()
+            assert log_row is not None
+            assert log_row[0] == "FAILED"
+            assert "extra column(s): nonexistent_column" in log_row[1]
+
+            # Confirm rollback
+            cur.execute(
+                f"SELECT COUNT(*) FROM {test_schema}.customers WHERE _batch_id = %s",
+                (res["batch_id"],),
+            )
+            assert cur.fetchone()[0] == 0
+
+
+@pytest.mark.integration
+def test_integration_bronze_column_order_allowed(
+    db_conn: psycopg2.extensions.connection,
+    test_schema: str,
+) -> None:
+    """Column order differences are allowed: ingestion must succeed and correctly map values."""
+    with tempfile.TemporaryDirectory() as td:
+        test_dir = Path(td)
+        test_file = test_dir / "customers.csv"
+        # Reorder columns: created_at first, customer_id second, etc.
+        header = "created_at,customer_id,first_name,last_name,gender,date_of_birth,state,occupation\n"
+        row = "2026-01-01T00:00:00+08:00,C009999,Zul,Ariff,Male,1990-05-15,Selangor,Teacher\n"
+        test_file.write_text(header + row, encoding="utf-8")
+
+        res = ingest_source(
+            conn=db_conn,
+            source_name="customers",
+            raw_dir=test_dir,
+            force=True,
+            schema=test_schema,
+        )
+
+        assert res["status"] == "SUCCESS"
+        assert res["rows_loaded"] == 1
+
+        # Confirm data landed in the right columns despite different CSV order
+        with db_conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT customer_id, first_name, last_name, occupation, state, created_at
+                FROM {test_schema}.customers
+                WHERE _batch_id = %s
+                """,
+                (res["batch_id"],),
+            )
+            db_row = cur.fetchone()
+            assert db_row == ("C009999", "Zul", "Ariff", "Teacher", "Selangor", "2026-01-01T00:00:00+08:00")
+

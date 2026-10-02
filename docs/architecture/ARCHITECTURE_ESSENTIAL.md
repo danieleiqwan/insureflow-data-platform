@@ -23,7 +23,7 @@ Python 3.12+ (`venv`, `requirements.txt`, `requirements-dev.txt`, `pytest.ini`) 
 
 ## Data model & Schemas
 - **Warehouse Schemas:** PostgreSQL uses separate schemas for medallion layers. `bronze` is implemented in Phase 3; `silver` and `gold` will be added in Phases 4 and 5 (see ADR-013).
-- **Bronze schema (`bronze.*`):** Tables `customers`, `policies`, `claims`, `payments`, `facilities_master`. All source business fields are `TEXT`. Metadata: `_batch_id` (UUID), `_source_file` (TEXT), `_source_row_number` (INT), `_ingested_at` (TIMESTAMPTZ NOT NULL DEFAULT now()). Audit log: `bronze.ingestion_log`. Append-only (see ADR-012).
+- **Bronze schema (`bronze.*`):** Tables `customers`, `policies`, `claims`, `payments`, `facilities_master`. All source business fields are `TEXT`. Metadata: `_batch_id` (UUID), `_source_file` (TEXT), `_source_row_number` (INT), `_ingested_at` (TIMESTAMPTZ NOT NULL DEFAULT now()). Audit log: `bronze.ingestion_log`. Append-only with pre-load header schema validation (see ADR-012).
 - **Public relational schema (`public.*`):** Source relational baseline (`facilities`, `customers`, `policies`, `claims`, `payments`). PKs, FKs with `ON DELETE RESTRICT` (ADR-009, ADR-010), `NUMERIC(12,2)` money, `CHECK` constraints. Left unpopulated in Phase 3 as candidate Silver contract for Phase 4.
 
 ## Synthetic data rules

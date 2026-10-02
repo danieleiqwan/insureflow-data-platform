@@ -172,6 +172,76 @@ def log_ingestion_result(
             )
 
 
+METADATA_COLUMNS: set[str] = {
+    "_batch_id",
+    "_source_file",
+    "_source_row_number",
+    "_ingested_at",
+}
+
+
+class HeaderValidationError(ValueError):
+    """Raised when CSV header does not match expected columns of the target bronze table."""
+
+    def __init__(
+        self,
+        message: str,
+        missing: Optional[List[str]] = None,
+        extra: Optional[List[str]] = None,
+    ) -> None:
+        super().__init__(message)
+        self.missing = missing or []
+        self.extra = extra or []
+
+
+def get_expected_table_columns(cur, schema: str, table_name: str) -> List[str]:
+    """Retrieve non-metadata column names for the target bronze table from PostgreSQL."""
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s
+          AND column_name NOT IN ('_batch_id', '_source_file', '_source_row_number', '_ingested_at')
+        ORDER BY ordinal_position;
+        """,
+        (schema, table_name),
+    )
+    cols = [row[0] for row in cur.fetchall()]
+    if not cols:
+        raise ValueError(f"Target table {schema}.{table_name} not found or has no columns")
+    return cols
+
+
+def validate_header(
+    actual_columns: List[str],
+    expected_columns: List[str],
+    table_name: str,
+) -> None:
+    """Validate that CSV header columns match the expected target table columns.
+
+    Column order differences are allowed.
+    Raises HeaderValidationError if columns are missing, extra, or duplicated.
+    """
+    actual_set = set(actual_columns)
+    expected_set = set(expected_columns)
+
+    missing = sorted(expected_set - actual_set)
+    extra = sorted(actual_set - expected_set)
+
+    errors: List[str] = []
+    if missing:
+        errors.append(f"missing column(s): {', '.join(missing)}")
+    if extra:
+        errors.append(f"extra column(s): {', '.join(extra)}")
+    if len(actual_columns) != len(actual_set):
+        duplicates = sorted({c for c in actual_columns if actual_columns.count(c) > 1})
+        errors.append(f"duplicate column(s): {', '.join(duplicates)}")
+
+    if errors:
+        msg = f"Header validation failed for {table_name}: " + "; ".join(errors)
+        raise HeaderValidationError(msg, missing=missing, extra=extra)
+
+
 # ─── Ingestion Core ───────────────────────────────────────────────────────────
 
 def ingest_source(
@@ -225,26 +295,37 @@ def ingest_source(
                 "message": "skipped: already loaded",
             }
 
-    # Prepare data in memory buffer for COPY
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, lineterminator="\n", delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    ingested_at_iso = started_at.isoformat()
-
-    row_count = 0
-    with open(file_path, "r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        header = next(reader)
-        target_columns = config["column_mapper"](header)
-
-        for row_idx, row in enumerate(reader, start=1):
-            row_count += 1
-            # Row structure: [_batch_id, _source_file, _source_row_number, _ingested_at, <raw_columns...>]
-            writer.writerow([str(batch_id), config["file_name"], row_idx, ingested_at_iso, *row])
-
-    buffer.seek(0)
-
-    # Single-transaction COPY with rollback on failure
     try:
+        # Retrieve expected columns from target database table
+        with conn.cursor() as cur:
+            expected_columns = get_expected_table_columns(cur, schema, config["table_name"])
+
+        # Prepare data in memory buffer for COPY
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n", delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        ingested_at_iso = started_at.isoformat()
+
+        row_count = 0
+        with open(file_path, "r", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            try:
+                raw_header = next(reader)
+            except StopIteration:
+                raise HeaderValidationError(
+                    f"Header validation failed for {table_name}: source file is empty (missing header)"
+                )
+
+            target_columns = config["column_mapper"](raw_header)
+            validate_header(target_columns, expected_columns, table_name)
+
+            for row_idx, row in enumerate(reader, start=1):
+                row_count += 1
+                # Row structure: [_batch_id, _source_file, _source_row_number, _ingested_at, <raw_columns...>]
+                writer.writerow([str(batch_id), config["file_name"], row_idx, ingested_at_iso, *row])
+
+        buffer.seek(0)
+
+        # Single-transaction COPY with rollback on failure
         with conn:
             with conn.cursor() as cur:
                 all_cols = ["_batch_id", "_source_file", "_source_row_number", "_ingested_at"] + target_columns
