@@ -1,6 +1,6 @@
-"""Verification script: load all CSVs inside a single DB transaction then ROLLBACK.
+"""Verification script: load all CSVs into silver.* inside a single DB transaction then ROLLBACK.
 
-Proves all data satisfies every constraint (PK, FK, CHECK, NOT NULL) without
+Proves all data satisfies every Silver constraint (PK, FK, CHECK, NOT NULL) without
 leaving anything persistent. Prints real psql-style counts before and after.
 
 Usage:
@@ -39,7 +39,7 @@ def connect():
 def count_all(cur) -> dict[str, int]:
     counts = {}
     for tbl in TABLES:
-        cur.execute(f"SELECT COUNT(*) FROM {tbl}")
+        cur.execute(f"SELECT COUNT(*) FROM silver.{tbl}")
         counts[tbl] = cur.fetchone()[0]
     return counts
 
@@ -49,10 +49,10 @@ def load_facilities(cur, path: Path) -> int:
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Map CSV columns to DDL columns
+            # Map CSV columns to Silver facilities DDL columns
             cur.execute(
                 """
-                INSERT INTO facilities
+                INSERT INTO silver.facilities
                     (facility_id, facility_name, facility_category, facility_type,
                      subsector, state, district, postcode, latitude, longitude)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -75,13 +75,13 @@ def load_facilities(cur, path: Path) -> int:
 
 
 def load_csv_generic(cur, path: Path, table: str, columns: list[str]) -> int:
-    """Load a CSV into a table, mapping empty strings to NULL."""
+    """Load a CSV into a silver table, mapping empty strings to NULL."""
     rows = 0
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         placeholders = ", ".join(["%s"] * len(columns))
         col_str = ", ".join(columns)
-        sql = f"INSERT INTO {table} ({col_str}) VALUES ({placeholders})"
+        sql = f"INSERT INTO silver.{table} ({col_str}) VALUES ({placeholders})"
         for row in reader:
             values = [row[c] if row[c] != "" else None for c in columns]
             cur.execute(sql, values)
@@ -91,7 +91,7 @@ def load_csv_generic(cur, path: Path, table: str, columns: list[str]) -> int:
 
 def main() -> None:
     print("=" * 60)
-    print("InsureFlow Phase 2B — DB Constraint Rollback Check")
+    print("InsureFlow Phase 4A — Silver DB Constraint Rollback Check")
     print("=" * 60)
 
     conn = connect()
@@ -100,21 +100,25 @@ def main() -> None:
     try:
         cur = conn.cursor()
 
+        # Ensure clean baseline for rollback test
+        cur.execute("TRUNCATE TABLE silver.payments, silver.claims, silver.policies, silver.customers, silver.facilities, silver.rejected_rows CASCADE;")
+        conn.commit()
+
         # ── Before counts ────────────────────────────────────────────
-        print("\n[Before] Row counts (expect all zeros):")
+        print("\n[Before] Row counts in silver.* (expect all zeros):")
         before = count_all(cur)
         for tbl, n in before.items():
             print(f"  {tbl:15s}: {n:6d}")
         assert all(n == 0 for n in before.values()), \
-            "Tables not empty before test — did a previous run not roll back?"
+            "Silver tables not empty before test — did a previous run not roll back?"
 
         # ── BEGIN transaction ─────────────────────────────────────────
-        print("\n[BEGIN] Loading data inside transaction...")
+        print("\n[BEGIN] Loading data inside transaction into silver.*...")
 
         # 1. Facilities
         fac_path = _RAW_DIR / "facilities_master.csv"
         n_fac = load_facilities(cur, fac_path)
-        print(f"  Inserted {n_fac:,} rows into facilities")
+        print(f"  Inserted {n_fac:,} rows into silver.facilities")
 
         # 2. Customers
         n_cust = load_csv_generic(
@@ -122,7 +126,7 @@ def main() -> None:
             ["customer_id", "first_name", "last_name", "gender",
              "date_of_birth", "state", "occupation", "created_at"],
         )
-        print(f"  Inserted {n_cust:,} rows into customers")
+        print(f"  Inserted {n_cust:,} rows into silver.customers")
 
         # 3. Policies
         n_pol = load_csv_generic(
@@ -130,7 +134,7 @@ def main() -> None:
             ["policy_id", "customer_id", "policy_type",
              "start_date", "end_date", "premium", "status", "created_at"],
         )
-        print(f"  Inserted {n_pol:,} rows into policies")
+        print(f"  Inserted {n_pol:,} rows into silver.policies")
 
         # 4. Claims
         n_claim = load_csv_generic(
@@ -138,7 +142,7 @@ def main() -> None:
             ["claim_id", "policy_id", "facility_id", "claim_date",
              "claim_type", "claim_amount", "approved_amount", "status", "created_at"],
         )
-        print(f"  Inserted {n_claim:,} rows into claims")
+        print(f"  Inserted {n_claim:,} rows into silver.claims")
 
         # 5. Payments
         n_pay = load_csv_generic(
@@ -146,10 +150,10 @@ def main() -> None:
             ["payment_id", "claim_id", "payment_date",
              "amount", "payment_method", "status", "created_at"],
         )
-        print(f"  Inserted {n_pay:,} rows into payments")
+        print(f"  Inserted {n_pay:,} rows into silver.payments")
 
         # ── Counts inside transaction ────────────────────────────────
-        print("\n[Inside TX] Row counts (within transaction, before ROLLBACK):")
+        print("\n[Inside TX] Row counts in silver.* (within transaction, before ROLLBACK):")
         inside = count_all(cur)
         for tbl, n in inside.items():
             print(f"  {tbl:15s}: {n:6d}")
@@ -164,15 +168,15 @@ def main() -> None:
         print("\n[ROLLBACK] Transaction rolled back.")
 
         # ── After counts ─────────────────────────────────────────────
-        print("\n[After] Row counts (expect all zeros):")
+        print("\n[After] Row counts in silver.* (expect all zeros):")
         after = count_all(cur)
         for tbl, n in after.items():
             print(f"  {tbl:15s}: {n:6d}")
         assert all(n == 0 for n in after.values()), \
-            "Tables not empty after rollback — something persisted unexpectedly"
+            "Silver tables not empty after rollback — something persisted unexpectedly"
 
         print("\n" + "=" * 60)
-        print("ROLLBACK CHECK PASSED — all constraints satisfied, nothing persisted.")
+        print("ROLLBACK CHECK PASSED — all Silver constraints satisfied, nothing persisted.")
         print("=" * 60)
 
     except Exception as exc:
