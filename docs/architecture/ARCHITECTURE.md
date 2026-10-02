@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft v0.1 |
-| **Current phase** | Phase 3 — Ingestion + Bronze |
+| **Current phase** | Phase 4A — Silver Layer |
 | **Short version** | See [`ARCHITECTURE_ESSENTIAL.md`](./ARCHITECTURE_ESSENTIAL.md) |
 
 **Status legend:** **[Implemented]** exists in the repo · **[Planned]** agreed direction, not built · **[Tentative]** idea, may change.
@@ -34,10 +34,10 @@ flowchart LR
 | Data Sources | Synthetic generators, MOH facility registry | Implemented (Phase 1, 2A, 2B) |
 | Ingestion | Load raw sources via psycopg2 COPY with audit logging | **[Implemented in Phase 3]** |
 | Bronze | Raw, append-only tables in `bronze` schema with metadata | **[Implemented in Phase 3]** |
-| Silver | Cleaned, typed, deduplicated, conformed | **[Planned]** |
-| Data Quality | Rule checks, thresholds, quarantine of bad rows, reports | **[Planned]** |
+| Silver | Typed, constrained, validated; rejected rows quarantined in `silver.rejected_rows` | **[Implemented in Phase 4A]** |
+| Data Quality | Rule framework, DQ checks, reporting beyond row rejection | **[Planned — Phase 4B]** |
 | Gold | Business-ready dimensional model | **[Planned]** |
-| PostgreSQL Warehouse | Serves Gold to BI; hosts `bronze` and relational schemas | **[Implemented]** (Docker Compose) |
+| PostgreSQL Warehouse | Serves Gold to BI; hosts `bronze` and `silver` schemas | **[Implemented]** (Docker Compose) |
 | Power BI | Dashboards | **[Planned]** |
 
 Later additions: dbt, Airflow, MinIO (S3-compatible), incremental processing, monitoring, optional Azure/Databricks concepts **[Tentative]**.
@@ -51,10 +51,15 @@ Later additions: dbt, Airflow, MinIO (S3-compatible), incremental processing, mo
 - Audit logging via `bronze.ingestion_log` with SHA256 checksums, row counts, execution duration, and SUCCESS/FAILED status. Idempotent skip on unchanged files unless `--force` is passed.
 - Pre-load CSV header schema validation: before loading, CSV header columns are compared against expected bronze table columns. Batches with missing or extra columns fail and roll back with a descriptive audit log entry; column order differences are allowed.
 
-### Silver **[Planned]**
-- Enforces types, trims/standardises text, handles nulls, removes duplicates.
-- Conforms codes (e.g. state names, facility identifiers) across sources.
-- Rows failing hard quality rules are quarantined, not silently dropped.
+### Silver **[Implemented in Phase 4A]**
+- Resides in dedicated `silver` schema (`sql/silver.sql`).
+- Full refresh per run: TRUNCATE all silver tables + `silver.rejected_rows`, then reload inside a single transaction.
+- Reads only the latest batch per source from Bronze (from `bronze.ingestion_log` or latest `_batch_id` as fallback).
+- Type casting: TEXT → DATE, TEXT → NUMERIC(12,2) via Decimal, TEXT → TIMESTAMPTZ; enum values validated against CHECK constraint sets.
+- Referential integrity enforced in Python before INSERT: policies referencing unknown customers, claims referencing unknown policies or facilities, and payments referencing unknown claims are routed to `silver.rejected_rows`.
+- `silver.rejected_rows`: captures `source_table`, `source_batch_id`, `source_row_number`, `reject_reason` (text), `raw_row` (JSONB), `rejected_at`.
+- Load order respects FKs: facilities & customers → policies → claims → payments.
+- Aggregated DQ rule framework and reporting deferred to Phase 4B.
 
 ### Data Quality **[Planned]**
 - Rule categories: completeness, uniqueness, validity (ranges, allowed values), referential integrity, consistency (e.g. `approved_amount <= claim_amount`).
@@ -89,9 +94,9 @@ Dimensional (star) model, tentatively:
 | Object storage | MinIO | Local S3-compatible storage, transferable to cloud | **[Planned]** |
 | BI | Power BI | Requested consumption layer | **[Planned]** |
 
-## 5. Data Model (Phase 1) **[Implemented in Phase 1]**
+## 5. Data Model **[Implemented in Phases 1–4A]**
 
-Phase 1 tables live in the default `public` schema and act as the **source-system model**. Warehouse layering (Bronze/Silver/Gold) will be introduced later; see ADR-006.
+The `public` schema has been retired (ADR-014). The relational model now lives in the `silver` schema. The `bronze` schema holds all raw ingested data. There is no longer a `public.*` relational table.
 
 ```mermaid
 erDiagram
@@ -141,20 +146,21 @@ erDiagram
     }
 ```
 
-### 5.1 Type and constraint conventions
+### 5.1 Type and constraint conventions (applied in silver.*)
 
 - Money: `NUMERIC(12,2)`. Never `FLOAT`.
 - Timestamps: `TIMESTAMPTZ NOT NULL DEFAULT now()` for `created_at`.
 - Dates: `DATE`.
 - IDs: `VARCHAR` with fixed prefix format (see §6).
 - `NOT NULL` on every column that must always exist.
-- `CHECK` constraints for enumerated values (`gender`, all `status` columns, types).
-- `CHECK (end_date >= start_date)` on `policies`.
-- Non-negative `CHECK` constraints: `premium >= 0` on `policies`, `claim_amount >= 0` and `approved_amount >= 0` on `claims`, `amount >= 0` on `payments`.
-- `CHECK (approved_amount <= claim_amount)` on `claims`.
-- Referential integrity: All foreign keys (`policies.customer_id`, `claims.policy_id`, `claims.facility_id`, `payments.claim_id`) enforce `ON DELETE RESTRICT` (see ADR-009, ADR-010) to preserve audit trails.
-- Indexes on all foreign-key columns (`idx_policies_customer_id`, `idx_claims_policy_id`, `idx_claims_facility_id`, `idx_payments_claim_id`).
-- `claims.facility_id` is a `NOT NULL` foreign key referencing `facilities(facility_id)` (Phase 2B, ADR-010 superseding ADR-007).
+- `CHECK` constraints for enumerated values (`gender`, all `status` columns, types); all named `chk_silver_*`.
+- `CHECK (end_date >= start_date)` on `silver.policies`.
+- Non-negative `CHECK` constraints: `premium >= 0` on `silver.policies`, `claim_amount >= 0` and `approved_amount >= 0` on `silver.claims`, `amount >= 0` on `silver.payments`.
+- `CHECK (approved_amount <= claim_amount)` on `silver.claims`.
+- Referential integrity: All foreign keys enforce `ON DELETE RESTRICT` (ADR-009, ADR-010); all named `fk_silver_*`.
+- Indexes on all FK columns; all named `idx_silver_*`.
+- `silver.claims.facility_id` is a `NOT NULL` FK referencing `silver.facilities(facility_id)` (ADR-010).
+- `silver.facilities.facility_category` and `silver.facilities.subsector` are `NOT NULL` with no hardcoded CHECK constraints (ADR-011).
 
 ### 5.2 Proposed enumerations (finalise in the SQL script)
 
@@ -227,11 +233,11 @@ insureflow-data-platform/
 │   ├── processed/         # future pipeline outputs
 │   └── sample/            # small tracked samples
 ├── src/
-│   ├── ingestion/         # future
+│   ├── ingestion/         # Bronze COPY loader (ingest_bronze.py)
 │   ├── generation/        # synthetic data generators
-│   ├── transformation/    # future
-│   └── quality/           # future
-├── sql/                   # schema and DDL scripts (init.sql)
+│   ├── transformation/    # Silver transformation (transform_silver.py)
+│   └── quality/           # future (Phase 4B+)
+├── sql/                   # DDL scripts (init.sql, bronze.sql, silver.sql)
 ├── tests/                 # automated test suite (pytest)
 ├── notebooks/
 └── docs/
@@ -247,9 +253,9 @@ insureflow-data-platform/
 |---|---|
 | `src/generation/` | Produce synthetic datasets. Pure data generation; no DB writes in Phase 1. |
 | `src/ingestion/` | Move data from sources into Bronze. Empty in Phase 1. |
-| `src/transformation/` | Bronze → Silver → Gold logic. Empty in Phase 1. |
+| `src/transformation/` | Bronze → Silver → Gold logic. `transform_silver.py` implemented in Phase 4A. |
 | `src/quality/` | Data quality rules and reporting. Empty in Phase 1. |
-| `sql/` | Idempotent, from-scratch-runnable DDL (`init.sql`). |
+| `sql/` | Idempotent DDL: `init.sql` (drops public schema), `bronze.sql` (Bronze layer), `silver.sql` (Silver layer). |
 | `tests/` | Automated checks (row count, uniqueness, determinism in Phase 1 via `pytest`). |
 | `requirements.txt` | Core runtime dependencies pinned. |
 | `requirements-dev.txt` | Dev/test dependencies pinned (`pytest`). |
@@ -303,7 +309,8 @@ Introduced with Silver. Principles decided now so later work stays consistent:
 | 2A | Facility data source acquisition, profiling, and reference proposal |
 | 2B | Policy, claim, payment generators; link claims to facilities reference |
 | 3 | Ingestion code; Bronze layer with metadata |
-| 4 | Silver transformations; DQ framework |
+| 4A | Silver schema, typed transformation, rejected_rows table, public.* retirement (ADR-014) |
+| 4B | DQ rule framework, aggregated quality reports |
 | 5 | Gold dimensional model in Postgres |
 | 6 | Power BI connects to Gold |
 | 7 | dbt takes over transformations; Airflow orchestrates |
@@ -327,7 +334,8 @@ Introduced with Silver. Principles decided now so later work stays consistent:
 | ADR-010 | Real facility IDs from MOH master as PK and claims FK | Sourced from Ministry of Health Malaysia (`KOD_FASILITI`). Establishes referential integrity on `claims.facility_id` with `ON DELETE RESTRICT`, `NOT NULL`, and indexing. Supersedes ADR-007. | Accepted |
 | ADR-011 | Omit CHECK constraints on externally sourced facility category/subsector | External government registries (MOH) can introduce new categories or subsectors over time. Hardcoded CHECK constraints at the database ingestion boundary would fail upstream loads. Validation and conformance belong to the Data Quality phase (Silver layer) rather than raw DDL. Columns remain `NOT NULL`. | Accepted |
 | ADR-012 | Bronze layer schema & ingestion design | All business columns stored as untyped `TEXT` to capture raw source data verbatim. Metadata columns (`_batch_id`, `_source_file`, `_source_row_number`, `_ingested_at`) track provenance and load order. Append-only persistence (no updates/deletes). Ingestion via single-transaction `COPY` with pre-load CSV header schema validation (fail and rollback on missing or extra columns, order-agnostic), file SHA256 idempotency checks, and audit logging in `bronze.ingestion_log`. | Accepted |
-| ADR-013 | Medallion multi-schema layout in PostgreSQL & ADR-006 resolution | Single PostgreSQL database with dedicated schemas for medallion stages: `bronze` created in Phase 3; `silver` and `gold` deferred to Phases 4 and 5. The existing `public.*` relational tables created in Phase 1/2B remain untouched in Phase 3 (left unpopulated) and serve as a baseline candidate contract for the Silver layer to be decided in Phase 4. Supersedes ADR-006. | Accepted |
+| ADR-013 | Medallion multi-schema layout in PostgreSQL & ADR-006 resolution | Single PostgreSQL database with dedicated schemas for medallion stages: `bronze` created in Phase 3; `silver` and `gold` deferred to Phases 4 and 5. The existing `public.*` relational tables created in Phase 1/2B remain untouched in Phase 3 (left unpopulated) and serve as a baseline candidate contract for the Silver layer to be decided in Phase 4. Supersedes ADR-006. | Superseded by ADR-014 |
+| ADR-014 | Silver schema, public.* retirement, and Silver transform design | `public` schema dropped; `silver` schema created via `sql/silver.sql` with same typed/constrained DDL. Full-refresh transform reads latest Bronze batch, casts types, enforces FK chains in Python, routes bad rows to `silver.rejected_rows`. Supersedes ADR-006 and ADR-013 on the question of public.* fate. See `docs/ADR-014.md`. | Accepted |
 
 ## 16. Conventions
 

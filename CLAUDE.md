@@ -6,7 +6,7 @@ The imported `AGENTS.md` holds the shared project rules (phase gate, setup comma
 
 ## Working style
 
-- **Current phase is 1.** Do not build anything from later phases, even if it looks like a small helpful extra.
+- **Current phase is 4A.** Do not build anything from later phases (4B, Gold, dbt, Airflow, Power BI), even if it looks like a small helpful extra.
 - Read `docs/architecture/ARCHITECTURE_ESSENTIAL.md` before starting. Open `ARCHITECTURE.md` only when you need detail.
 - For multi-file work, state a short plan first, then execute. Do not stop to ask permission for steps that are clearly in scope.
 - Prefer editing existing files over creating new ones. Do not create files that the current phase does not need.
@@ -26,7 +26,7 @@ The imported `AGENTS.md` holds the shared project rules (phase gate, setup comma
 - Push to a remote unless asked.
 - Modify `docs/PRD.md` scope or the roadmap without being asked.
 - Mark anything as implemented in the README or docs unless it exists and has been run.
-- Start Phase 2 after finishing Phase 1. Deliver the final report from `AGENTS.md` and stop.
+- Start Phase 4B after finishing Phase 4A. Deliver the final report from `AGENTS.md` and stop.
 
 ## Keeping docs in sync
 

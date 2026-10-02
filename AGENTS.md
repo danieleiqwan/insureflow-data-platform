@@ -16,13 +16,14 @@ Target flow: Data Sources → Ingestion → Bronze → Silver → Data Quality �
 
 ## Current phase
 
-> **CURRENT PHASE: 3 — Ingestion + Bronze**
+> **CURRENT PHASE: 4A — Silver Layer**
 
 ### Phase rules (strict)
 
 - Work **only** on the current phase.
-- Do **not** implement Silver/Gold pipelines, Data Quality framework, dbt, Airflow, Power BI, MinIO, Azure, or Databricks.
-- Data may be loaded **only into the `bronze` schema** in Phase 3. Existing `public.*` tables remain untouched.
+- Do **not** implement Gold, dbt, Airflow, Power BI, MinIO, Azure, or Databricks.
+- Phase 4A is complete: Silver schema is in `silver.*`, `transform_silver.py` runs, `silver.rejected_rows` exists.
+- Phase 4B (DQ rule framework, aggregated DQ reporting) has not started. Do not implement it unless asked.
 - Do **not** start the next phase automatically. When the phase is complete, deliver the final report and **stop**.
 - If a task seems to require future-phase work, stop and ask.
 - Never describe planned work as implemented in the README or docs.
@@ -56,18 +57,18 @@ pytest
 python src/generation/generate_customers.py
 ```
 
-## Repository map
-
 | Path | Purpose |
 |---|---|
 | `src/generation/` | Synthetic data generators (Phase 1 & 2B) |
-| `src/ingestion/` | `download_sources.py` (MOH fetch) + `ingest_bronze.py` (Bronze COPY loader) |
-| `src/transformation/`, `src/quality/` | Empty until their phases; keep `.gitkeep` |
-| `sql/` | From-scratch DDL scripts (`bronze.sql`, `init.sql`) |
+| `src/ingestion/` | Source acquisition (`download_sources.py`) + Bronze COPY loader (`ingest_bronze.py`) |
+| `src/transformation/` | Silver transform (`transform_silver.py`); implemented in Phase 4A |
+| `src/quality/` | Empty until Phase 4B; keep `.gitkeep` |
+| `sql/` | From-scratch DDL scripts (`init.sql`, `bronze.sql`, `silver.sql`) |
+| `scripts/` | Utility scripts (`verify_db_rollback.py` now targets `silver.*`) |
 | `data/raw/` | Generated/ingested files (all 5 CSVs are tracked) |
 | `data/processed/`, `data/sample/` | Future outputs / small samples |
-| `tests/` | Automated checks (`test_generate_customers.py`, `test_generate_phase2b.py`, `test_ingest_bronze.py`) |
-| `docs/` | PRD and architecture docs |
+| `tests/` | Automated checks (unit + integration; no real data touched) |
+| `docs/` | PRD, architecture docs, ADR files (`ADR-012.md`, `ADR-014.md`) |
 | `requirements.txt` | Core runtime dependencies pinned |
 | `requirements-dev.txt` | Development and testing dependencies (`pytest`) |
 | `pytest.ini` | Test configuration (`pythonpath = .`) |

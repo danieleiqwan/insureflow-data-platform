@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft v0.1 |
 | **Owner** | Daniel |
-| **Current phase** | Phase 3 — Ingestion + Bronze |
+| **Current phase** | Phase 4A — Silver Layer |
 | **Last updated** | 2026-09-28 |
 
 > Status legend used across the docs: **[Implemented]** exists in the repo, **[Planned]** agreed direction but not built, **[Tentative]** idea, may change.
@@ -57,7 +57,8 @@ Phase order after Phase 1 is **[Tentative]** and can be re-prioritised. Only Pha
 | 2A | Facility Data Source Acquisition | Download & profile real Malaysian healthcare facility data (MOH/data.gov.my); evaluate candidate datasets for facility IDs | **[Implemented]** |
 | 2B | Synthetic Insurance Data Expansion | Policy, claim, payment generators; link claims to selected facility reference | **[Implemented]** |
 | 3 | Ingestion + Bronze | Load raw sources as-is with ingestion metadata into `bronze` schema; COPY runner & audit log | **[Implemented]** |
-| 4 | Silver + Data Quality | Cleaning, typing, dedupe, conformance; DQ checks and reporting | Planned |
+| 4A | Silver Layer | Typed Silver schema, full-refresh transform, `silver.rejected_rows`, public.* retirement | **[Implemented]** |
+| 4B | Data Quality Rule Framework | DQ rules, thresholds, aggregated DQ reports | Planned |
 | 5 | Gold + Warehouse | Dimensional model in PostgreSQL | Tentative |
 | 6 | Analytics | Power BI dashboards on Gold | Tentative |
 | 7 | Transformation Framework + Orchestration | dbt models/tests, Airflow DAGs | Tentative |

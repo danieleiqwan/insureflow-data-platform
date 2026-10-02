@@ -2,8 +2,8 @@
 
 InsureFlow is a portfolio-grade, end-to-end **Data Engineering** project simulating a Malaysian health-insurance data platform. It combines public Malaysian healthcare data with realistic synthetic insurance transactions, processing them through a medallion pipeline into a PostgreSQL warehouse and Power BI analytics dashboard.
 
-> **Current Phase: Phase 3 — Ingestion + Bronze**  
-> Status: Core repository foundation, PostgreSQL relational schema container (with `facilities`, `customers`, `policies`, `claims`, and `payments` tables), Ministry of Health Malaysia facility dataset acquisition (Phase 2A), deterministic synthetic generators for all four transactional entities (Phase 2B), and PostgreSQL Bronze layer ingestion with audit logging (Phase 3) are implemented. All pipeline stages beyond Bronze (Silver/Gold) are planned for subsequent phases.
+> **Current Phase: Phase 4A — Silver Layer**
+> Status: Bronze ingestion (Phase 3) is complete. Phase 4A introduces the typed `silver` schema, full-refresh Silver transformation, row-level rejection tracking (`silver.rejected_rows`), and retires the unused `public.*` tables. Data Quality rule framework and reporting are planned for Phase 4B.
 
 ---
 
@@ -23,9 +23,9 @@ flowchart LR
         direction TB
         ING["Ingestion Pipeline [Implemented - P3]"]
         BRZ["Bronze Layer (bronze.*) [Implemented - P3]"]
-        SLV["Silver Layer & Data Quality [Planned - P4]"]
+        SLV["Silver Layer (silver.*) [Implemented - P4A]"]
         GLD["Gold Dimensional Model [Planned - P5]"]
-        PG[("PostgreSQL Warehouse [bronze & public Schemas]")]
+        PG[("PostgreSQL Warehouse [bronze & silver Schemas]")]
     end
 
     subgraph S3[Analytics]
@@ -43,9 +43,10 @@ flowchart LR
 | **Data Sources** | Ministry of Health facility master registry acquisition (5,160 facilities) | **Implemented (Phase 2A)** |
 | **Data Sources** | Synthetic policies (1,379), claims (423), payments (364); FK to facilities | **Implemented (Phase 2B)** |
 | **Ingestion & Bronze** | Raw data COPY ingestion with audit metadata into `bronze` schema | **Implemented (Phase 3)** |
-| **Silver & DQ** | Cleansing, conforming, quality rules, quarantine | **Planned** (Phase 4) |
+| **Silver Layer** | Typed `silver` schema, full-refresh transform, `silver.rejected_rows`, `public.*` retired | **Implemented (Phase 4A)** |
+| **Data Quality Framework** | DQ rule checks, thresholds, aggregated reports | **Planned** (Phase 4B) |
 | **Gold & Warehouse** | Dimensional star schema serving | **Planned** (Phase 5) |
-| **Database Container** | PostgreSQL 16 via Docker Compose (`bronze.sql`, `init.sql`) | **Implemented (Phase 1, 2B, 3)** |
+| **Database Container** | PostgreSQL 16 via Docker Compose (`init.sql`, `bronze.sql`, `silver.sql`) | **Implemented (Phase 1, 2B, 3, 4A)** |
 | **Analytics** | Power BI reports and executive metrics | **Planned** (Phase 6) |
 | **Orchestration & Transformation** | dbt models and Airflow DAGs | **Planned** (Phase 7) |
 
@@ -59,7 +60,7 @@ flowchart LR
 - **Database:** PostgreSQL 16 (Docker Compose)
 - **Database Driver:** `psycopg2-binary`
 - **Configuration:** `python-dotenv` with `.env` (git-ignored) and `.env.example`
-- **Testing:** `pytest` (37 automated unit, property, and regression tests)
+- **Testing:** `pytest` (77 automated unit and integration tests)
 - **Version Control:** Git
 
 ---
@@ -111,8 +112,9 @@ flowchart LR
 ├── scripts/
 │   └── verify_db_rollback.py # Automated DB constraint & FK check with rollback
 ├── sql/
-│   ├── init.sql              # Relational DDL (public.*: facilities, customers, policies, claims, payments)
-│   └── bronze.sql            # Bronze schema DDL (bronze.*: 5 data tables + ingestion_log)
+│   ├── init.sql              # Drops public schema (Phase 4A+)
+│   ├── bronze.sql            # Bronze schema DDL (bronze.*: 5 data tables + ingestion_log)
+│   └── silver.sql            # Silver schema DDL (silver.*: 5 typed tables + rejected_rows)
 ├── src/
 │   ├── generation/           # Synthetic data generation suite
 │   │   ├── common.py         # Shared seed handling, constants, CSV writer
@@ -124,12 +126,14 @@ flowchart LR
 │   ├── ingestion/            # Source data acquisition & Bronze ingestion
 │   │   ├── download_sources.py  # Idempotent downloader for MOH / data.gov.my
 │   │   └── ingest_bronze.py     # Bronze COPY loader with audit log (Phase 3)
-│   ├── transformation/       # [Planned] Phase 4
-│   └── quality/              # [Planned] Phase 4
+│   ├── transformation/       # Silver transform suite
+│   │   └── transform_silver.py  # Full-refresh Bronze → Silver with reject logging (Phase 4A)
+│   └── quality/              # [Planned] Phase 4B
 └── tests/
     ├── test_generate_customers.py  # 10 tests for customer generator
     ├── test_generate_phase2b.py    # 37 tests (regression, FKs, distributions, amounts)
-    └── test_ingest_bronze.py       # 9 tests (unit + integration) for Bronze ingestion
+    ├── test_ingest_bronze.py       # 16 tests (unit + integration) for Bronze ingestion
+    └── test_transform_silver.py    # 14 tests (unit + integration) for Silver transformation
 ```
 
 ---
@@ -207,7 +211,25 @@ docker compose exec postgres psql -U insureflow_user -d insureflow -c "
   ) t;"
 ```
 
-### 6. Run Test Suite
+### 6. Transform Bronze to Silver (Phase 4A)
+
+```powershell
+# Full refresh: truncates silver.*, loads latest Bronze batch, logs rejections
+python src/transformation/transform_silver.py
+```
+
+Verify Silver counts and rejected rows:
+```powershell
+docker compose exec postgres psql -U insureflow_user -d insureflow -c "
+  SELECT 'silver.facilities' AS tbl, count(*) FROM silver.facilities
+  UNION ALL SELECT 'silver.customers', count(*) FROM silver.customers
+  UNION ALL SELECT 'silver.policies', count(*) FROM silver.policies
+  UNION ALL SELECT 'silver.claims', count(*) FROM silver.claims
+  UNION ALL SELECT 'silver.payments', count(*) FROM silver.payments
+  UNION ALL SELECT 'silver.rejected_rows', count(*) FROM silver.rejected_rows;"
+```
+
+### 7. Run Test Suite
 
 ```powershell
 pytest -v
