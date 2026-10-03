@@ -37,7 +37,7 @@ flowchart LR
 | Silver | Typed, constrained, validated; rejected rows quarantined in `silver.rejected_rows` | **[Implemented in Phase 4A]** |
 | Data Quality | Rule framework, defect injection, quarantine, reporting | **[Implemented in Phase 4B]** |
 | Gold | Business-ready dimensional model | **[Implemented in Phase 5]** |
-| PostgreSQL Warehouse | Serves Gold to BI; hosts `bronze` and `silver` schemas | **[Implemented]** (Docker Compose) |
+| PostgreSQL Warehouse | Serves Gold to BI; hosts `bronze`, `silver`, and `gold` schemas | **[Implemented]** (Docker Compose) |
 | Power BI | Dashboards | **[Planned]** |
 
 Later additions: dbt, Airflow, MinIO (S3-compatible), incremental processing, monitoring, optional Azure/Databricks concepts **[Tentative]**.
@@ -309,18 +309,21 @@ insureflow-data-platform/
 │   ├── processed/         # future pipeline outputs
 │   └── sample/            # small tracked samples
 ├── src/
-│   ├── ingestion/         # Bronze COPY loader (ingest_bronze.py)
+│   ├── ingestion/         # Source acquisition & Bronze COPY loader (ingest_bronze.py)
 │   ├── generation/        # synthetic data generators
-│   ├── transformation/    # Silver transformation (transform_silver.py)
-│   └── quality/           # future (Phase 4B+)
-├── sql/                   # DDL scripts (init.sql, bronze.sql, silver.sql)
-├── tests/                 # automated test suite (pytest)
+│   ├── transformation/    # Silver transform (transform_silver.py) & Gold load (load_gold.py)
+│   └── quality/           # DQ defect injection, rules, and runner (Phase 4B)
+├── sql/                   # DDL scripts (init.sql, bronze.sql, silver.sql, gold.sql)
+├── tests/                 # automated test suite (pytest: 110 tests)
 ├── notebooks/
 └── docs/
     ├── PRD.md
+    ├── data-sources.md
+    ├── ADR-012.md, ADR-014.md, ADR-015.md, ADR-016.md
     └── architecture/
         ├── ARCHITECTURE.md
-        └── ARCHITECTURE_ESSENTIAL.md
+        ├── ARCHITECTURE_ESSENTIAL.md
+        └── pipeline-diagram.md
 ```
 
 ### Module responsibilities

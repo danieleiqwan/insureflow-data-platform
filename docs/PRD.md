@@ -60,7 +60,7 @@ Phase order after Phase 1 is **[Tentative]** and can be re-prioritised. Only Pha
 | 4A | Silver Layer | Typed Silver schema, full-refresh transform, `silver.rejected_rows`, public.* retirement | **[Implemented]** |
 | 4B | Data Quality Rule Framework | DQ rules, thresholds, aggregated DQ reports, quarantine CSVs, recall/FP metrics; defect manifest stored as `defect_manifest.csv` | **[Implemented]** |
 | 5 | Gold + Warehouse | Star schema dimensional model in `gold.*` (`dim_date`, `dim_customer`, `dim_policy`, `dim_facility`, `fact_claims`, `fact_payments`); natural-key PKs (ADR-016); `load_gold.py` full-refresh loader | **[Implemented]** |
-| 6 | Analytics | Power BI dashboards on Gold | Tentative |
+| 6 | Analytics | Power BI dashboards on Gold | **[Planned]** |
 | 7 | Transformation Framework + Orchestration | dbt models/tests, Airflow DAGs | Tentative |
 | 8 | Object Storage + Incremental Processing | MinIO/S3-compatible storage, incremental loads | Tentative |
 | 9 | Monitoring + CI | Pipeline monitoring, alerts, automated tests in CI | Tentative |
