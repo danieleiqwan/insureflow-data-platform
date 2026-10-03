@@ -58,7 +58,7 @@ Phase order after Phase 1 is **[Tentative]** and can be re-prioritised. Only Pha
 | 2B | Synthetic Insurance Data Expansion | Policy, claim, payment generators; link claims to selected facility reference | **[Implemented]** |
 | 3 | Ingestion + Bronze | Load raw sources as-is with ingestion metadata into `bronze` schema; COPY runner & audit log | **[Implemented]** |
 | 4A | Silver Layer | Typed Silver schema, full-refresh transform, `silver.rejected_rows`, public.* retirement | **[Implemented]** |
-| 4B | Data Quality Rule Framework | DQ rules, thresholds, aggregated DQ reports | Planned |
+| 4B | Data Quality Rule Framework | DQ rules, thresholds, aggregated DQ reports, quarantine CSVs, recall/FP metrics; defect manifest stored as `defect_manifest.csv` | **[Implemented]** |
 | 5 | Gold + Warehouse | Dimensional model in PostgreSQL | Tentative |
 | 6 | Analytics | Power BI dashboards on Gold | Tentative |
 | 7 | Transformation Framework + Orchestration | dbt models/tests, Airflow DAGs | Tentative |
