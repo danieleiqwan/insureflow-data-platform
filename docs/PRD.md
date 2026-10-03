@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft v0.1 |
 | **Owner** | Daniel |
-| **Current phase** | Phase 4B — Data Quality (Defect Injection + DQ Rules) |
+| **Current phase** | Phase 5 — Gold Layer (Dimensional Model) |
 | **Last updated** | 2026-10-03 |
 
 > Status legend used across the docs: **[Implemented]** exists in the repo, **[Planned]** agreed direction but not built, **[Tentative]** idea, may change.
@@ -59,7 +59,7 @@ Phase order after Phase 1 is **[Tentative]** and can be re-prioritised. Only Pha
 | 3 | Ingestion + Bronze | Load raw sources as-is with ingestion metadata into `bronze` schema; COPY runner & audit log | **[Implemented]** |
 | 4A | Silver Layer | Typed Silver schema, full-refresh transform, `silver.rejected_rows`, public.* retirement | **[Implemented]** |
 | 4B | Data Quality Rule Framework | DQ rules, thresholds, aggregated DQ reports, quarantine CSVs, recall/FP metrics; defect manifest stored as `defect_manifest.csv` | **[Implemented]** |
-| 5 | Gold + Warehouse | Dimensional model in PostgreSQL | Tentative |
+| 5 | Gold + Warehouse | Star schema dimensional model in `gold.*` (`dim_date`, `dim_customer`, `dim_policy`, `dim_facility`, `fact_claims`, `fact_payments`); natural-key PKs (ADR-016); `load_gold.py` full-refresh loader | **[Implemented]** |
 | 6 | Analytics | Power BI dashboards on Gold | Tentative |
 | 7 | Transformation Framework + Orchestration | dbt models/tests, Airflow DAGs | Tentative |
 | 8 | Object Storage + Incremental Processing | MinIO/S3-compatible storage, incremental loads | Tentative |

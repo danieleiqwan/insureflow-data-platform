@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft v0.1 |
-| **Current phase** | Phase 4B — Data Quality (Defect Injection + DQ Rules) |
+| **Current phase** | Phase 5 — Gold Layer (Dimensional Model) |
 | **Short version** | See [`ARCHITECTURE_ESSENTIAL.md`](./ARCHITECTURE_ESSENTIAL.md) |
 
 **Status legend:** **[Implemented]** exists in the repo · **[Planned]** agreed direction, not built · **[Tentative]** idea, may change.
@@ -36,7 +36,7 @@ flowchart LR
 | Bronze | Raw, append-only tables in `bronze` schema with metadata | **[Implemented in Phase 3]** |
 | Silver | Typed, constrained, validated; rejected rows quarantined in `silver.rejected_rows` | **[Implemented in Phase 4A]** |
 | Data Quality | Rule framework, defect injection, quarantine, reporting | **[Implemented in Phase 4B]** |
-| Gold | Business-ready dimensional model | **[Planned]** |
+| Gold | Business-ready dimensional model | **[Implemented in Phase 5]** |
 | PostgreSQL Warehouse | Serves Gold to BI; hosts `bronze` and `silver` schemas | **[Implemented]** (Docker Compose) |
 | Power BI | Dashboards | **[Planned]** |
 
@@ -68,17 +68,90 @@ Later additions: dbt, Airflow, MinIO (S3-compatible), incremental processing, mo
 - Reporting & evaluation (`src/quality/run_dq_checks.py`): writes `data/sample/dq_report.csv` and `data/sample/dq_report.md` tracking rows checked, failed, and fail rate per rule, plus ground truth recall and false positive benchmarks against the manifest.
 - Zero-failure clean baseline: running against `data/raw/` yields 0 failures across all rules.
 
-### Gold **[Planned]**
-Dimensional (star) model, tentatively:
+### Gold **[Implemented in Phase 5]**
+
+Star schema in `gold.*`. Natural keys from Silver used as PKs (see ADR-016).
 
 | Table | Type | Grain |
 |---|---|---|
-| `dim_customer` | dimension | one row per customer |
-| `dim_policy` | dimension | one row per policy |
-| `dim_facility` | dimension | one row per healthcare facility |
-| `dim_date` | dimension | one row per calendar day |
-| `fact_claims` | fact | one row per claim |
-| `fact_payments` | fact | one row per payment |
+| `gold.dim_date` | dimension | one row per calendar day; `date_key DATE PK` |
+| `gold.dim_customer` | dimension | one row per customer; includes computed `age` |
+| `gold.dim_policy` | dimension | one row per policy |
+| `gold.dim_facility` | dimension | one row per healthcare facility |
+| `gold.fact_claims` | fact | one row per claim; `customer_id` denormalized from policy |
+| `gold.fact_payments` | fact | one row per payment |
+
+DDL: `sql/gold.sql`. Load script: `src/transformation/load_gold.py` (full refresh, single transaction).
+
+```mermaid
+erDiagram
+    dim_customer ||--o{ dim_policy : holds
+    dim_policy   ||--o{ fact_claims : "covered by"
+    dim_customer ||--o{ fact_claims : "denorm filter"
+    dim_facility ||--o{ fact_claims : treated_at
+    dim_date     ||--o{ fact_claims : claim_date_key
+    fact_claims  ||--o{ fact_payments : settled_by
+    dim_date     ||--o{ fact_payments : payment_date_key
+
+    dim_date {
+        date   date_key PK
+        date   full_date
+        int    year
+        int    quarter
+        int    month
+        text   month_name
+        int    day
+        int    day_of_week
+        text   day_name
+        bool   is_weekend
+    }
+    dim_customer {
+        varchar customer_id PK
+        text    first_name
+        text    last_name
+        text    gender
+        date    date_of_birth
+        int     age
+        text    state
+        text    occupation
+    }
+    dim_policy {
+        varchar policy_id PK
+        varchar customer_id FK
+        text    policy_type
+        date    start_date
+        date    end_date
+        numeric premium
+        text    status
+    }
+    dim_facility {
+        varchar facility_id PK
+        text    facility_name
+        text    facility_category
+        text    facility_type
+        text    state
+        text    district
+    }
+    fact_claims {
+        varchar claim_id PK
+        varchar policy_id FK
+        varchar customer_id FK
+        varchar facility_id FK
+        date    claim_date_key FK
+        text    claim_type
+        numeric claim_amount
+        numeric approved_amount
+        text    status
+    }
+    fact_payments {
+        varchar payment_id PK
+        varchar claim_id FK
+        date    payment_date_key FK
+        numeric amount
+        text    payment_method
+        text    status
+    }
+```
 
 ## 4. Technology Choices
 
@@ -255,11 +328,11 @@ insureflow-data-platform/
 | Path | Responsibility |
 |---|---|
 | `src/generation/` | Produce synthetic datasets. Pure data generation; no DB writes in Phase 1. |
-| `src/ingestion/` | Move data from sources into Bronze. Empty in Phase 1. |
-| `src/transformation/` | Bronze → Silver → Gold logic. `transform_silver.py` implemented in Phase 4A. |
+| `src/ingestion/` | Move data from sources into Bronze. |
+| `src/transformation/` | Bronze → Silver → Gold logic. `transform_silver.py` (Phase 4A), `load_gold.py` (Phase 5). |
 | `src/quality/` | Data quality defect injection (`inject_defects.py`), rules (`dq_rules.py`), and runner (`run_dq_checks.py`) (Phase 4B). |
-| `sql/` | Idempotent DDL: `init.sql` (drops public schema), `bronze.sql` (Bronze layer), `silver.sql` (Silver layer). |
-| `tests/` | Automated checks (row count, uniqueness, determinism in Phase 1 via `pytest`). |
+| `sql/` | Idempotent DDL: `init.sql` (drops public schema), `bronze.sql`, `silver.sql`, `gold.sql`. |
+| `tests/` | Automated checks (unit + integration via `pytest`). |
 | `requirements.txt` | Core runtime dependencies pinned. |
 | `requirements-dev.txt` | Dev/test dependencies pinned (`pytest`). |
 | `pytest.ini` | Python path configuration for `pytest` root discovery. |
@@ -313,8 +386,8 @@ Introduced with Silver. Principles decided now so later work stays consistent:
 | 2B | Policy, claim, payment generators; link claims to facilities reference |
 | 3 | Ingestion code; Bronze layer with metadata |
 | 4A | Silver schema, typed transformation, rejected_rows table, public.* retirement (ADR-014) |
-| 4B | DQ rule framework, aggregated quality reports |
-| 5 | Gold dimensional model in Postgres |
+| 4B | DQ rule framework, defect injection, quarantine, recall/FP reporting (ADR-015) |
+| 5 | Gold dimensional model in Postgres (star schema, natural keys, ADR-016) |
 | 6 | Power BI connects to Gold |
 | 7 | dbt takes over transformations; Airflow orchestrates |
 | 8 | MinIO replaces local files as the lake; incremental loads |
@@ -340,6 +413,7 @@ Introduced with Silver. Principles decided now so later work stays consistent:
 | ADR-013 | Medallion multi-schema layout in PostgreSQL & ADR-006 resolution | Single PostgreSQL database with dedicated schemas for medallion stages: `bronze` created in Phase 3; `silver` and `gold` deferred to Phases 4 and 5. The existing `public.*` relational tables created in Phase 1/2B remain untouched in Phase 3 (left unpopulated) and serve as a baseline candidate contract for the Silver layer to be decided in Phase 4. Supersedes ADR-006. | Superseded by ADR-014 |
 | ADR-014 | Silver schema, public.* retirement, and Silver transform design | `public` schema dropped; `silver` schema created via `sql/silver.sql` with same typed/constrained DDL. Full-refresh transform reads latest Bronze batch, casts types, enforces FK chains in Python, routes bad rows to `silver.rejected_rows`. Supersedes ADR-006 and ADR-013 on the question of public.* fate. See `docs/ADR-014.md`. | Accepted |
 | ADR-015 | Data Quality rule framework & Quarantine-Not-Delete strategy | Structured DQ rules covering 4 dimensions (completeness, uniqueness, validity, consistency). Synthetic defect injection (~1.5% across 4 categories) with manifest tracking for measurable recall and zero false positives. Failing rows quarantined to isolated CSV files with root-cause reason trails rather than deleted. See `docs/ADR-015.md`. | Accepted |
+| ADR-016 | Gold Layer: natural keys as dimension PKs; `dim_date.date_key` as DATE | Natural keys (business identifiers from Silver) used as PKs for all Gold dimensions for simplicity; no SCD requirement in Phase 5. DATE type for date_key preferred over INT YYYYMMDD for native BI and PostgreSQL handling. Surrogate keys deferred to a future phase if SCD2 is required. See `docs/ADR-016.md`. | Accepted |
 
 ## 16. Conventions
 

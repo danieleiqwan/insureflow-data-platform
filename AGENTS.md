@@ -16,16 +16,16 @@ Target flow: Data Sources → Ingestion → Bronze → Silver → Data Quality �
 
 ## Current phase
 
-> **CURRENT PHASE: 4B — Data Quality (Defect Injection + DQ Rules)**
+> **CURRENT PHASE: 5 — Gold Layer (Dimensional Model)**
 
 ### Phase rules (strict)
 
 - Work **only** on the current phase.
-- Do **not** implement Gold, dbt, Airflow, Power BI, MinIO, Azure, or Databricks.
-- Phase 4A is complete: Silver schema is in `silver.*`, `transform_silver.py` runs, `silver.rejected_rows` exists.
-- Phase 4B scope: inject realistic defects into sample copies of clean data, build DQ rule framework, quarantine failing rows, and report recall and false positives.
-- Do **not** load dirty/quarantined data into any database schema. This phase is file-based in `data/sample/`.
-- Do **not** start the next phase automatically. When the phase is complete, deliver the final report and **stop**.
+- Do **not** implement dbt, Airflow, Power BI, MinIO, Azure, or Databricks.
+- Phase 4B is complete: DQ framework is in `src/quality/`, defect manifest and quarantine CSVs in `data/sample/`.
+- Phase 5 scope: build `gold.*` star schema DDL (`sql/gold.sql`), full-refresh load script (`src/transformation/load_gold.py`), unit + integration tests, and updated docs.
+- Gold is built from `silver.*` only — never from bronze, quarantine, or dirty files.
+- Do **not** start Phase 6 (Power BI / Analytics) automatically. Deliver the final report and **stop**.
 - If a task seems to require future-phase work, stop and ask.
 - Never describe planned work as implemented in the README or docs.
 
@@ -62,14 +62,14 @@ python src/generation/generate_customers.py
 |---|---|
 | `src/generation/` | Synthetic data generators (Phase 1 & 2B) |
 | `src/ingestion/` | Source acquisition (`download_sources.py`) + Bronze COPY loader (`ingest_bronze.py`) |
-| `src/transformation/` | Silver transform (`transform_silver.py`); implemented in Phase 4A |
+| `src/transformation/` | Silver transform (`transform_silver.py`) and Gold load (`load_gold.py`) |
 | `src/quality/` | Data quality defect injection (`inject_defects.py`), rules (`dq_rules.py`), and runner (`run_dq_checks.py`) (Phase 4B) |
-| `sql/` | From-scratch DDL scripts (`init.sql`, `bronze.sql`, `silver.sql`) |
-| `scripts/` | Utility scripts (`verify_db_rollback.py` now targets `silver.*`) |
+| `sql/` | From-scratch DDL scripts (`init.sql`, `bronze.sql`, `silver.sql`, `gold.sql`) |
+| `scripts/` | Utility scripts (`verify_db_rollback.py` targets `silver.*`) |
 | `data/raw/` | Generated/ingested files (all 5 CSVs are tracked) |
-| `data/processed/`, `data/sample/` | Future outputs / small samples |
+| `data/sample/` | Dirty datasets, quarantine files, and DQ reports (Phase 4B) |
 | `tests/` | Automated checks (unit + integration; no real data touched) |
-| `docs/` | PRD, architecture docs, ADR files (`ADR-012.md`, `ADR-014.md`) |
+| `docs/` | PRD, architecture docs, ADR files (`ADR-012.md`, `ADR-014.md`, `ADR-015.md`, `ADR-016.md`) |
 | `requirements.txt` | Core runtime dependencies pinned |
 | `requirements-dev.txt` | Development and testing dependencies (`pytest`) |
 | `pytest.ini` | Test configuration (`pythonpath = .`) |

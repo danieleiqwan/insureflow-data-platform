@@ -2,8 +2,8 @@
 
 InsureFlow is a portfolio-grade, end-to-end **Data Engineering** project simulating a Malaysian health-insurance data platform. It combines public Malaysian healthcare data with realistic synthetic insurance transactions, processing them through a medallion pipeline into a PostgreSQL warehouse and Power BI analytics dashboard.
 
-> **Current Phase: Phase 4B — Data Quality (Defect Injection + DQ Rules)**
-> Status: Silver layer (Phase 4A) is complete. Phase 4B introduces a composable Data Quality (DQ) rule framework across 4 dimensions, realistic synthetic defect injection (~1.5% rate) with manifest provenance tracking, and a quarantine-not-delete strategy measuring detection recall (100%) and low false positives without modifying clean baseline data.
+> **Current Phase: Phase 5 — Gold Layer (Dimensional Model)**
+> Status: Silver (Phase 4A) and Data Quality (Phase 4B) are complete. Phase 5 introduces a star schema Gold layer in `gold.*` sourced entirely from clean Silver data, with `dim_date` generated dynamically from the actual date range in Silver and `fact_claims.customer_id` denormalized from policies for easier BI filtering.
 
 ---
 
@@ -24,15 +24,16 @@ flowchart LR
         ING["Ingestion Pipeline [Implemented - P3]"]
         BRZ["Bronze Layer (bronze.*) [Implemented - P3]"]
         SLV["Silver Layer (silver.*) [Implemented - P4A]"]
-        GLD["Gold Dimensional Model [Planned - P5]"]
-        PG[("PostgreSQL Warehouse [bronze & silver Schemas]")]
+        DQ["Data Quality Framework [Implemented - P4B]"]
+        GLD["Gold Dimensional Model (gold.*) [Implemented - P5]"]
+        PG[("PostgreSQL Warehouse [bronze, silver & gold schemas]")]
     end
 
     subgraph S3[Analytics]
         PBI["Power BI Dashboards [Planned - P6]"]
     end
 
-    S1 --> ING --> BRZ --> SLV --> GLD --> PG --> PBI
+    S1 --> ING --> BRZ --> SLV --> DQ --> GLD --> PG --> PBI
 ```
 
 ### Stage Status Overview
@@ -45,8 +46,8 @@ flowchart LR
 | **Ingestion & Bronze** | Raw data COPY ingestion with audit metadata into `bronze` schema | **Implemented (Phase 3)** |
 | **Silver Layer** | Typed `silver` schema, full-refresh transform, `silver.rejected_rows`, `public.*` retired | **Implemented (Phase 4A)** |
 | **Data Quality Framework** | DQ rule checks, defect injection, quarantine, reporting | **Implemented (Phase 4B)** |
-| **Gold & Warehouse** | Dimensional star schema serving | **Planned** (Phase 5) |
-| **Database Container** | PostgreSQL 16 via Docker Compose (`init.sql`, `bronze.sql`, `silver.sql`) | **Implemented (Phase 1, 2B, 3, 4A)** |
+| **Gold & Warehouse** | Star schema `gold.*`: `dim_date`, `dim_customer`, `dim_policy`, `dim_facility`, `fact_claims`, `fact_payments` | **Implemented (Phase 5)** |
+| **Database Container** | PostgreSQL 16 via Docker Compose (`init.sql`, `bronze.sql`, `silver.sql`, `gold.sql`) | **Implemented (Phase 1–5)** |
 | **Analytics** | Power BI reports and executive metrics | **Planned** (Phase 6) |
 | **Orchestration & Transformation** | dbt models and Airflow DAGs | **Planned** (Phase 7) |
 
@@ -114,7 +115,8 @@ flowchart LR
 ├── sql/
 │   ├── init.sql              # Drops public schema (Phase 4A+)
 │   ├── bronze.sql            # Bronze schema DDL (bronze.*: 5 data tables + ingestion_log)
-│   └── silver.sql            # Silver schema DDL (silver.*: 5 typed tables + rejected_rows)
+│   ├── silver.sql            # Silver schema DDL (silver.*: 5 typed tables + rejected_rows)
+│   └── gold.sql              # Gold schema DDL (gold.*: 4 dims + 2 facts, star schema)
 ├── src/
 │   ├── generation/           # Synthetic data generation suite
 │   │   ├── common.py         # Shared seed handling, constants, CSV writer
@@ -126,8 +128,9 @@ flowchart LR
 │   ├── ingestion/            # Source data acquisition & Bronze ingestion
 │   │   ├── download_sources.py  # Idempotent downloader for MOH / data.gov.my
 │   │   └── ingest_bronze.py     # Bronze COPY loader with audit log (Phase 3)
-│   ├── transformation/       # Silver transform suite
-│   │   └── transform_silver.py  # Full-refresh Bronze → Silver with reject logging (Phase 4A)
+│   ├── transformation/       # Transformation suite
+│   │   ├── transform_silver.py  # Full-refresh Bronze → Silver with reject logging (Phase 4A)
+│   │   └── load_gold.py         # Full-refresh Silver → Gold star schema load (Phase 5)
 │   └── quality/              # Data Quality suite (Phase 4B)
 │       ├── inject_defects.py # Deterministic defect injector + manifest recorder
 │       ├── dq_rules.py       # Composable rules (completeness, uniqueness, validity, consistency)
@@ -139,7 +142,8 @@ flowchart LR
     ├── test_transform_silver.py    # 14 tests (unit + integration) for Silver transformation
     ├── test_inject_defects.py      # 3 tests for defect injector determinism and manifest
     ├── test_dq_rules.py            # 11 unit tests for individual DQ rules
-    └── test_run_dq_checks.py       # 2 integration tests for DQ pipeline and clean baseline
+    ├── test_run_dq_checks.py       # 2 integration tests for DQ pipeline and clean baseline
+    └── test_load_gold.py           # 17 tests (unit: age/date-dim; integration: counts, idempotency, gaps)
 ```
 
 ---
@@ -248,20 +252,48 @@ python src/quality/run_dq_checks.py
 python src/quality/run_dq_checks.py --clean
 ```
 
-### 8. Run Test Suite
+### 8. Load Silver into Gold (Phase 5)
+
+```powershell
+# Full refresh: truncates gold.*, rebuilds star schema from clean silver.* in one transaction
+python src/transformation/load_gold.py
+```
+
+Verify Gold counts:
+```powershell
+docker compose exec postgres psql -U insureflow_user -d insureflow -c "
+  SELECT 'gold.dim_date'     AS tbl, count(*) FROM gold.dim_date
+  UNION ALL SELECT 'gold.dim_customer',  count(*) FROM gold.dim_customer
+  UNION ALL SELECT 'gold.dim_policy',    count(*) FROM gold.dim_policy
+  UNION ALL SELECT 'gold.dim_facility',  count(*) FROM gold.dim_facility
+  UNION ALL SELECT 'gold.fact_claims',   count(*) FROM gold.fact_claims
+  UNION ALL SELECT 'gold.fact_payments', count(*) FROM gold.fact_payments;"
+```
+
+### 9. Run Test Suite
 
 ```powershell
 pytest -v
 ```
 
-### 9. Verify Database Constraints (Non-destructive Check)
+### 10. Verify Database Constraints (Non-destructive Check)
 
 ```powershell
 python scripts/verify_db_rollback.py
 ```
 
-### 10. Reset Database from Scratch (Destructive)
+### 11. Reset Database from Scratch (Destructive)
 
 ```powershell
 docker compose down -v; docker compose up -d
+```
+
+### Full Pipeline (end-to-end)
+
+```powershell
+# After DB is up and healthy:
+python -m src.generation.generate_all      # Regenerate synthetic data
+python src/ingestion/ingest_bronze.py      # Load into Bronze
+python src/transformation/transform_silver.py  # Transform to Silver
+python src/transformation/load_gold.py     # Load Gold star schema
 ```
