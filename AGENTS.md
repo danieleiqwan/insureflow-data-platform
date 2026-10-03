@@ -16,14 +16,15 @@ Target flow: Data Sources → Ingestion → Bronze → Silver → Data Quality �
 
 ## Current phase
 
-> **CURRENT PHASE: 4A — Silver Layer**
+> **CURRENT PHASE: 4B — Data Quality (Defect Injection + DQ Rules)**
 
 ### Phase rules (strict)
 
 - Work **only** on the current phase.
 - Do **not** implement Gold, dbt, Airflow, Power BI, MinIO, Azure, or Databricks.
 - Phase 4A is complete: Silver schema is in `silver.*`, `transform_silver.py` runs, `silver.rejected_rows` exists.
-- Phase 4B (DQ rule framework, aggregated DQ reporting) has not started. Do not implement it unless asked.
+- Phase 4B scope: inject realistic defects into sample copies of clean data, build DQ rule framework, quarantine failing rows, and report recall and false positives.
+- Do **not** load dirty/quarantined data into any database schema. This phase is file-based in `data/sample/`.
 - Do **not** start the next phase automatically. When the phase is complete, deliver the final report and **stop**.
 - If a task seems to require future-phase work, stop and ask.
 - Never describe planned work as implemented in the README or docs.
@@ -62,7 +63,7 @@ python src/generation/generate_customers.py
 | `src/generation/` | Synthetic data generators (Phase 1 & 2B) |
 | `src/ingestion/` | Source acquisition (`download_sources.py`) + Bronze COPY loader (`ingest_bronze.py`) |
 | `src/transformation/` | Silver transform (`transform_silver.py`); implemented in Phase 4A |
-| `src/quality/` | Empty until Phase 4B; keep `.gitkeep` |
+| `src/quality/` | Data quality defect injection (`inject_defects.py`), rules (`dq_rules.py`), and runner (`run_dq_checks.py`) (Phase 4B) |
 | `sql/` | From-scratch DDL scripts (`init.sql`, `bronze.sql`, `silver.sql`) |
 | `scripts/` | Utility scripts (`verify_db_rollback.py` now targets `silver.*`) |
 | `data/raw/` | Generated/ingested files (all 5 CSVs are tracked) |

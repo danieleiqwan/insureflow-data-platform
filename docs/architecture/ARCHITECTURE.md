@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft v0.1 |
-| **Current phase** | Phase 4A — Silver Layer |
+| **Current phase** | Phase 4B — Data Quality (Defect Injection + DQ Rules) |
 | **Short version** | See [`ARCHITECTURE_ESSENTIAL.md`](./ARCHITECTURE_ESSENTIAL.md) |
 
 **Status legend:** **[Implemented]** exists in the repo · **[Planned]** agreed direction, not built · **[Tentative]** idea, may change.
@@ -35,7 +35,7 @@ flowchart LR
 | Ingestion | Load raw sources via psycopg2 COPY with audit logging | **[Implemented in Phase 3]** |
 | Bronze | Raw, append-only tables in `bronze` schema with metadata | **[Implemented in Phase 3]** |
 | Silver | Typed, constrained, validated; rejected rows quarantined in `silver.rejected_rows` | **[Implemented in Phase 4A]** |
-| Data Quality | Rule framework, DQ checks, reporting beyond row rejection | **[Planned — Phase 4B]** |
+| Data Quality | Rule framework, defect injection, quarantine, reporting | **[Implemented in Phase 4B]** |
 | Gold | Business-ready dimensional model | **[Planned]** |
 | PostgreSQL Warehouse | Serves Gold to BI; hosts `bronze` and `silver` schemas | **[Implemented]** (Docker Compose) |
 | Power BI | Dashboards | **[Planned]** |
@@ -59,11 +59,14 @@ Later additions: dbt, Airflow, MinIO (S3-compatible), incremental processing, mo
 - Referential integrity enforced in Python before INSERT: policies referencing unknown customers, claims referencing unknown policies or facilities, and payments referencing unknown claims are routed to `silver.rejected_rows`.
 - `silver.rejected_rows`: captures `source_table`, `source_batch_id`, `source_row_number`, `reject_reason` (text), `raw_row` (JSONB), `rejected_at`.
 - Load order respects FKs: facilities & customers → policies → claims → payments.
-- Aggregated DQ rule framework and reporting deferred to Phase 4B.
+- Aggregated DQ rule framework and reporting implemented in Phase 4B.
 
-### Data Quality **[Planned]**
-- Rule categories: completeness, uniqueness, validity (ranges, allowed values), referential integrity, consistency (e.g. `approved_amount <= claim_amount`).
-- Results are persisted and reportable, not just printed.
+### Data Quality **[Implemented in Phase 4B]**
+- Rule dimensions: completeness, uniqueness, validity (domain sets, ISO date formats, numeric bounds), consistency (future dates, customer age, `end_date >= start_date`, `approved_amount <= claim_amount`, cross-table policy periods and payment dates).
+- Defect injection (`src/quality/inject_defects.py`): deterministic injection (~1.5% across 4 categories) into separate sample copies (`data/sample/*_dirty.csv`) without altering clean data; ground-truth manifest in `data/sample/defect_manifest.csv`.
+- Quarantine-not-delete strategy: failing rows quarantined into `data/sample/<table>_quarantine.csv` with combined failure reasons; passing rows written to `data/sample/<table>_passed.csv`.
+- Reporting & evaluation (`src/quality/run_dq_checks.py`): writes `data/sample/dq_report.csv` and `data/sample/dq_report.md` tracking rows checked, failed, and fail rate per rule, plus ground truth recall and false positive benchmarks against the manifest.
+- Zero-failure clean baseline: running against `data/raw/` yields 0 failures across all rules.
 
 ### Gold **[Planned]**
 Dimensional (star) model, tentatively:
@@ -254,7 +257,7 @@ insureflow-data-platform/
 | `src/generation/` | Produce synthetic datasets. Pure data generation; no DB writes in Phase 1. |
 | `src/ingestion/` | Move data from sources into Bronze. Empty in Phase 1. |
 | `src/transformation/` | Bronze → Silver → Gold logic. `transform_silver.py` implemented in Phase 4A. |
-| `src/quality/` | Data quality rules and reporting. Empty in Phase 1. |
+| `src/quality/` | Data quality defect injection (`inject_defects.py`), rules (`dq_rules.py`), and runner (`run_dq_checks.py`) (Phase 4B). |
 | `sql/` | Idempotent DDL: `init.sql` (drops public schema), `bronze.sql` (Bronze layer), `silver.sql` (Silver layer). |
 | `tests/` | Automated checks (row count, uniqueness, determinism in Phase 1 via `pytest`). |
 | `requirements.txt` | Core runtime dependencies pinned. |
@@ -336,6 +339,7 @@ Introduced with Silver. Principles decided now so later work stays consistent:
 | ADR-012 | Bronze layer schema & ingestion design | All business columns stored as untyped `TEXT` to capture raw source data verbatim. Metadata columns (`_batch_id`, `_source_file`, `_source_row_number`, `_ingested_at`) track provenance and load order. Append-only persistence (no updates/deletes). Ingestion via single-transaction `COPY` with pre-load CSV header schema validation (fail and rollback on missing or extra columns, order-agnostic), file SHA256 idempotency checks, and audit logging in `bronze.ingestion_log`. | Accepted |
 | ADR-013 | Medallion multi-schema layout in PostgreSQL & ADR-006 resolution | Single PostgreSQL database with dedicated schemas for medallion stages: `bronze` created in Phase 3; `silver` and `gold` deferred to Phases 4 and 5. The existing `public.*` relational tables created in Phase 1/2B remain untouched in Phase 3 (left unpopulated) and serve as a baseline candidate contract for the Silver layer to be decided in Phase 4. Supersedes ADR-006. | Superseded by ADR-014 |
 | ADR-014 | Silver schema, public.* retirement, and Silver transform design | `public` schema dropped; `silver` schema created via `sql/silver.sql` with same typed/constrained DDL. Full-refresh transform reads latest Bronze batch, casts types, enforces FK chains in Python, routes bad rows to `silver.rejected_rows`. Supersedes ADR-006 and ADR-013 on the question of public.* fate. See `docs/ADR-014.md`. | Accepted |
+| ADR-015 | Data Quality rule framework & Quarantine-Not-Delete strategy | Structured DQ rules covering 4 dimensions (completeness, uniqueness, validity, consistency). Synthetic defect injection (~1.5% across 4 categories) with manifest tracking for measurable recall and zero false positives. Failing rows quarantined to isolated CSV files with root-cause reason trails rather than deleted. See `docs/ADR-015.md`. | Accepted |
 
 ## 16. Conventions
 

@@ -4,8 +4,8 @@
 |---|---|
 | **Status** | Draft v0.1 |
 | **Owner** | Daniel |
-| **Current phase** | Phase 4A — Silver Layer |
-| **Last updated** | 2026-09-28 |
+| **Current phase** | Phase 4B — Data Quality (Defect Injection + DQ Rules) |
+| **Last updated** | 2026-10-03 |
 
 > Status legend used across the docs: **[Implemented]** exists in the repo, **[Planned]** agreed direction but not built, **[Tentative]** idea, may change.
 

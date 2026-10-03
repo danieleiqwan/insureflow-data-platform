@@ -2,7 +2,7 @@
 
 One-page summary for quick orientation. Full detail: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
-**Current phase: 4A — Silver Layer.** Phase 1, Phase 2A, Phase 2B, Phase 3, and Phase 4A are implemented. Everything else is planned.
+**Current phase: 4B — Data Quality (Defect Injection + DQ Rules).** Phase 1, Phase 2A, Phase 2B, Phase 3, Phase 4A, and Phase 4B are implemented. Everything else is planned.
 
 ## What it is
 Portfolio Data Engineering project (`insureflow-data-platform`, path: `C:\Users\User\Projects\insureflow-data-platform`): Malaysian healthcare data + synthetic insurance data → medallion pipeline → PostgreSQL warehouse → Power BI.
@@ -15,7 +15,7 @@ Data Sources → Ingestion → Bronze → Silver → Data Quality → Gold → P
 | Sources (customer, policy, claim, payment generators; MOH facility data) | Implemented (Phase 1, 2A, 2B) |
 | Ingestion & Bronze layer (`bronze` schema, audit logging, COPY transactions) | Implemented (Phase 3) |
 | Silver layer (`silver` schema, typed transform, rejected_rows, public.* retired) | Implemented (Phase 4A) |
-| Data Quality rule framework, reporting | Planned (Phase 4B) |
+| Data Quality rule framework, quarantine, reporting | Implemented (Phase 4B) |
 | Gold, Power BI | Planned |
 | dbt, Airflow, MinIO, incremental, monitoring, cloud | Planned / tentative |
 
@@ -40,15 +40,17 @@ Python 3.12+ (`venv`, `requirements.txt`, `requirements-dev.txt`, `pytest.ini`) 
 | `src/generation/` | Synthetic data generators (Phase 1 & 2B) |
 | `src/ingestion/` | Source acquisition (`download_sources.py`) and Bronze COPY loader (`ingest_bronze.py`) |
 | `src/transformation/` | Silver transform (`transform_silver.py`) |
-| `src/quality/` | Empty until Phase 4B |
+| `src/quality/` | Data quality defect injection (`inject_defects.py`), rules (`dq_rules.py`), and runner (`run_dq_checks.py`) (Phase 4B) |
 | `sql/` | From-scratch DDL (`init.sql`, `bronze.sql`, `silver.sql`), mounted into Postgres init dir |
 | `data/raw/` | Generated/ingested source files |
+| `data/sample/` | Sample dirty datasets, quarantine files, and DQ reports (Phase 4B) |
 | `tests/` | Automated unit/property checks (`pytest`) |
 | `requirements.txt` | Runtime dependencies pinned |
 | `requirements-dev.txt` | Dev/test dependencies (`pytest`) |
 | `pytest.ini` | Pytest config (`pythonpath = .`) |
 | `scripts/verify_db_rollback.py` | Constraint verification against `silver.*` using ROLLBACK |
 | `docs/ADR-014.md` | ADR for Silver schema and public.* retirement |
+| `docs/ADR-015.md` | ADR for DQ rule framework and quarantine strategy |
 
 ## Docker / Postgres
 Pinned image (`postgres:16-alpine`), container `insureflow-postgres`, named volume, `restart: unless-stopped`, `pg_isready` health check, host port bound to `127.0.0.1:5433:5432` (default port 5433 via `POSTGRES_PORT:-5433`). Init scripts run only on an empty volume; reset in PowerShell with `docker compose down -v; docker compose up -d`.

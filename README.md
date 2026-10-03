@@ -2,8 +2,8 @@
 
 InsureFlow is a portfolio-grade, end-to-end **Data Engineering** project simulating a Malaysian health-insurance data platform. It combines public Malaysian healthcare data with realistic synthetic insurance transactions, processing them through a medallion pipeline into a PostgreSQL warehouse and Power BI analytics dashboard.
 
-> **Current Phase: Phase 4A — Silver Layer**
-> Status: Bronze ingestion (Phase 3) is complete. Phase 4A introduces the typed `silver` schema, full-refresh Silver transformation, row-level rejection tracking (`silver.rejected_rows`), and retires the unused `public.*` tables. Data Quality rule framework and reporting are planned for Phase 4B.
+> **Current Phase: Phase 4B — Data Quality (Defect Injection + DQ Rules)**
+> Status: Silver layer (Phase 4A) is complete. Phase 4B introduces a composable Data Quality (DQ) rule framework across 4 dimensions, realistic synthetic defect injection (~1.5% rate) with manifest provenance tracking, and a quarantine-not-delete strategy measuring detection recall (100%) and low false positives without modifying clean baseline data.
 
 ---
 
@@ -44,7 +44,7 @@ flowchart LR
 | **Data Sources** | Synthetic policies (1,379), claims (423), payments (364); FK to facilities | **Implemented (Phase 2B)** |
 | **Ingestion & Bronze** | Raw data COPY ingestion with audit metadata into `bronze` schema | **Implemented (Phase 3)** |
 | **Silver Layer** | Typed `silver` schema, full-refresh transform, `silver.rejected_rows`, `public.*` retired | **Implemented (Phase 4A)** |
-| **Data Quality Framework** | DQ rule checks, thresholds, aggregated reports | **Planned** (Phase 4B) |
+| **Data Quality Framework** | DQ rule checks, defect injection, quarantine, reporting | **Implemented (Phase 4B)** |
 | **Gold & Warehouse** | Dimensional star schema serving | **Planned** (Phase 5) |
 | **Database Container** | PostgreSQL 16 via Docker Compose (`init.sql`, `bronze.sql`, `silver.sql`) | **Implemented (Phase 1, 2B, 3, 4A)** |
 | **Analytics** | Power BI reports and executive metrics | **Planned** (Phase 6) |
@@ -128,12 +128,18 @@ flowchart LR
 │   │   └── ingest_bronze.py     # Bronze COPY loader with audit log (Phase 3)
 │   ├── transformation/       # Silver transform suite
 │   │   └── transform_silver.py  # Full-refresh Bronze → Silver with reject logging (Phase 4A)
-│   └── quality/              # [Planned] Phase 4B
+│   └── quality/              # Data Quality suite (Phase 4B)
+│       ├── inject_defects.py # Deterministic defect injector + manifest recorder
+│       ├── dq_rules.py       # Composable rules (completeness, uniqueness, validity, consistency)
+│       └── run_dq_checks.py  # Quarantine executor, DQ reporter, and recall evaluator
 └── tests/
     ├── test_generate_customers.py  # 10 tests for customer generator
     ├── test_generate_phase2b.py    # 37 tests (regression, FKs, distributions, amounts)
     ├── test_ingest_bronze.py       # 16 tests (unit + integration) for Bronze ingestion
-    └── test_transform_silver.py    # 14 tests (unit + integration) for Silver transformation
+    ├── test_transform_silver.py    # 14 tests (unit + integration) for Silver transformation
+    ├── test_inject_defects.py      # 3 tests for defect injector determinism and manifest
+    ├── test_dq_rules.py            # 11 unit tests for individual DQ rules
+    └── test_run_dq_checks.py       # 2 integration tests for DQ pipeline and clean baseline
 ```
 
 ---
@@ -229,19 +235,32 @@ docker compose exec postgres psql -U insureflow_user -d insureflow -c "
   UNION ALL SELECT 'silver.rejected_rows', count(*) FROM silver.rejected_rows;"
 ```
 
-### 7. Run Test Suite
+### 7. Run Data Quality Pipeline (Phase 4B)
+
+```powershell
+# 1. Inject controlled defects (~1.5% across 4 categories) into data/sample/
+python src/quality/inject_defects.py
+
+# 2. Execute DQ rules, quarantine defective rows, and benchmark against manifest
+python src/quality/run_dq_checks.py
+
+# 3. Sanity check: verify clean baseline (data/raw/) produces 0 failures
+python src/quality/run_dq_checks.py --clean
+```
+
+### 8. Run Test Suite
 
 ```powershell
 pytest -v
 ```
 
-### 7. Verify Database Constraints (Non-destructive Check)
+### 9. Verify Database Constraints (Non-destructive Check)
 
 ```powershell
 python scripts/verify_db_rollback.py
 ```
 
-### 8. Reset Database from Scratch (Destructive)
+### 10. Reset Database from Scratch (Destructive)
 
 ```powershell
 docker compose down -v; docker compose up -d
