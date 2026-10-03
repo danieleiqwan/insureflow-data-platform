@@ -166,10 +166,16 @@ def gold_test_schema(db_conn) -> Generator[str, None, None]:
     yield gold_schema
 
     # Teardown: drop isolated schema
+    try:
+        db_conn.rollback()
+    except Exception:
+        pass
     db_conn.autocommit = True
     cur = db_conn.cursor()
-    cur.execute(f"DROP SCHEMA IF EXISTS {gold_schema} CASCADE")
-    cur.close()
+    try:
+        cur.execute(f"DROP SCHEMA IF EXISTS {gold_schema} CASCADE")
+    finally:
+        cur.close()
     db_conn.autocommit = False
 
 
